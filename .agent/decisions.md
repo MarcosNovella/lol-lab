@@ -1,0 +1,9 @@
+# Decisions (ADR log, append-only)
+
+Format: `[ADR-00N] decision — why — rejected alt (date)`
+
+- [ADR-001] MCP server only, no web app yet — Marcos's call: work conversationally over the data for a few weeks and build UI only once we know which questions actually help, so no code gets thrown away — rejected: `src/modules/lol/` inside athlete-os now, standalone Next.js repo now (2026-08-14)
+- [ADR-002] The benchmark for "where am I losing vs my elo" is built from the OTHER players in his own matches, not from an external rank average — match-v5 returns all 10 participants, so every match yields exactly one same-role peer that Riot already MMR-matched to him, at zero extra request cost; sampling hundreds of Platinum players would cost thousands of requests against a 100/2min limit — rejected: league-v4 ladder sampling, third-party aggregate sites (different methodology, unverifiable) (2026-08-14)
+- [ADR-003] Zero-dependency runtime except the MCP SDK — Node 24 ships native `fetch`, native `node:sqlite`, and native TypeScript type-stripping, so there is no HTTP client, no DB driver, and no build step to maintain — rejected: better-sqlite3 + axios + tsx (three deps and a build step for capabilities already in the runtime) (2026-08-14)
+- [ADR-004] Store the full raw match JSON alongside flattened columns — matches are immutable once played, so the cache never needs invalidating, and a metric we did not think to flatten today can be derived tomorrow without re-hitting the API — rejected: flattened columns only (would force a re-backfill for every new metric) (2026-08-14)
+- [ADR-005] The key is read from `.env` on EVERY request, not cached at boot — development keys expire every 24h, and re-reading turns rotation into "paste and keep going" instead of "restart Claude Code" — rejected: read once at startup, a `riot_set_key` tool (would put the secret in the chat transcript) (2026-08-14)
