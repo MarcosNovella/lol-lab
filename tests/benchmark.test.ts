@@ -51,7 +51,11 @@ describe('benchmark', () => {
     expect(cs?.peerMean).toBeCloseTo(7, 1);
     expect(cs?.effect).toBeLessThan(0);
     expect(cs?.severity).toBe('crítico');
-    expect(result.weakest.some((c) => c.key === 'cs_per_min')).toBe(true);
+    // CS/min is contaminated, so the gap is measured but may not headline an unstratified
+    // report (G-008) — and it ranks the moment a stratum holds the snowball constant.
+    expect(result.weakest.some((c) => c.key === 'cs_per_min')).toBe(false);
+    const stratified = benchmark(db, { ...OPTS, role: 'MIDDLE', stratum: 'pareja al minuto 14' });
+    expect(stratified.weakest.some((c) => c.key === 'cs_per_min')).toBe(true);
   });
 
   it('recognises the same metric as a strength when he is ahead', () => {
@@ -59,7 +63,9 @@ describe('benchmark', () => {
     const result = benchmark(db, { ...OPTS, role: 'MIDDLE' });
     const cs = result.comparisons.find((c) => c.key === 'cs_per_min');
     expect(cs?.effect).toBeGreaterThan(0);
-    expect(result.strongest.some((c) => c.key === 'cs_per_min')).toBe(true);
+    expect(result.strongest.some((c) => c.key === 'cs_per_min')).toBe(false);
+    const stratified = benchmark(db, { ...OPTS, role: 'MIDDLE', stratum: 'pareja al minuto 14' });
+    expect(stratified.strongest.some((c) => c.key === 'cs_per_min')).toBe(true);
   });
 
   it('counts head-to-head wins against the direct lane opponent', () => {
@@ -125,7 +131,10 @@ describe('benchmark', () => {
     expect(Number.isNaN(cs?.effect ?? 0)).toBe(true); // honest: d really is undefined here
     expect(cs?.score).toBeLessThan(0); // but the ranking still knows he is behind
     expect(cs?.severity).toBe('crítico');
-    expect(result.weakest.some((c) => c.key === 'cs_per_min')).toBe(true);
+    // The fallback score has to survive all the way into the ranking, not just into the row.
+    // Checked under a stratum because CS/min is contaminated and cannot rank without one.
+    const stratified = benchmark(db, { ...OPTS, role: 'MIDDLE', stratum: 'pareja al minuto 14' });
+    expect(stratified.weakest.some((c) => c.key === 'cs_per_min')).toBe(true);
   });
 
   it('never prints NaN at a human', () => {

@@ -8,6 +8,7 @@ import {
   knownMatchIds,
   listAccounts,
   markSynced,
+  matchIdsMissingTimeline,
   saveMatch,
   saveTimeline,
   startSyncLog,
@@ -106,6 +107,61 @@ export type SyncResult = {
   errors: string[];
   elapsedMs: number;
 };
+
+export type BackfillOptions = {
+  puuid?: string;
+  queueId?: number;
+  /** Hard cap on timelines fetched this run. */
+  max?: number;
+  onProgress?: (done: number, total: number) => void;
+};
+
+export type BackfillResult = {
+  candidates: number;
+  fetched: number;
+  errors: string[];
+  elapsedMs: number;
+};
+
+/**
+ * Fetches the timelines of matches ALREADY in the cache.
+ *
+ * Deliberately separate from `syncMatches`: that one walks Riot's match-id list and only
+ * ever touches matches it is downloading, so it cannot repair a cache filled before
+ * timelines mattered. This walks the cache instead. Idempotent — a match that gains a
+ * timeline drops out of the candidate list on the next run, so it is safe to re-run after a
+ * rate-limit stall or an expired key.
+ */
+export async function backfillTimelines(
+  client: RiotClient,
+  db: Db,
+  options: BackfillOptions = {},
+): Promise<BackfillResult> {
+  const started = Date.now();
+  const ids = matchIdsMissingTimeline(db, {
+    ...(options.puuid !== undefined ? { puuid: options.puuid } : {}),
+    ...(options.queueId !== undefined ? { queueId: options.queueId } : {}),
+    ...(options.max !== undefined ? { limit: options.max } : {}),
+  });
+  const result: BackfillResult = { candidates: ids.length, fetched: 0, errors: [], elapsedMs: 0 };
+
+  for (const [index, matchId] of ids.entries()) {
+    try {
+      const timeline = await client.getTimeline(matchId);
+      saveTimeline(db, matchId, timeline);
+      result.fetched += 1;
+    } catch (error) {
+      result.errors.push(`${matchId}: ${error instanceof Error ? error.message : String(error)}`);
+      // Same bail-out as syncMatches: one bad match is noise, but five with nothing fetched
+      // is a dead key or a dead endpoint, and burning the rate limit on it helps nobody.
+      if (result.errors.length >= 5 && result.fetched === 0) break;
+    }
+    options.onProgress?.(index + 1, ids.length);
+  }
+
+  result.elapsedMs = Date.now() - started;
+  return result;
+}
 
 export async function syncMatches(
   client: RiotClient,

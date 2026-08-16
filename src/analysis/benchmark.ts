@@ -1,6 +1,6 @@
 import type { Db } from '../store/db.ts';
 import { type MatchListRow, queryParticipants } from '../store/matches.ts';
-import { METRICS, type Metric, type Role, roleLabel } from './metrics.ts';
+import { type Contamination, METRICS, type Metric, type Role, roleLabel } from './metrics.ts';
 import { cohensD, mean, median, percentileOf, round } from './stats.ts';
 
 /**
@@ -25,6 +25,13 @@ export type MetricComparison = {
   group: string;
   unit: string | null;
   higherIsBetter: boolean;
+  contamination: Contamination;
+  /**
+   * Whether this comparison is allowed to headline the report. False for a contaminated
+   * metric read outside a stratum: the number is still computed and shown, but it may not be
+   * ranked or called a leak (G-008).
+   */
+  rankable: boolean;
   games: number;
   peers: number;
   yours: number;
@@ -109,6 +116,14 @@ export type BenchmarkOptions = {
   queueLabel: string;
   since?: number;
   limit?: number;
+  /**
+   * Names the fixed game-state stratum the caller has already restricted the rows to, e.g.
+   * "pareja al minuto 14". Supplying it is what unlocks ranking on contaminated metrics:
+   * inside one stratum the snowball is held constant, so the mean stops measuring "when I
+   * win, I win big". Passing a label for rows that were NOT actually restricted defeats
+   * G-008 — the caller owns that contract.
+   */
+  stratum?: string;
 };
 
 export function benchmark(db: Db, options: BenchmarkOptions): BenchmarkResult {
@@ -203,6 +218,8 @@ export function benchmark(db: Db, options: BenchmarkOptions): BenchmarkResult {
       group: metric.group,
       unit: metric.unit ?? null,
       higherIsBetter: metric.higherIsBetter,
+      contamination: metric.contamination,
+      rankable: metric.contamination === 'causal' || options.stratum !== undefined,
       games: mineValues.length,
       peers: peerValues.length,
       yours: round(yours, metric.decimals),
@@ -219,8 +236,11 @@ export function benchmark(db: Db, options: BenchmarkOptions): BenchmarkResult {
     });
   }
 
+  // G-008 lives here. Without a stratum only causal metrics may be ranked, so a contaminated
+  // metric can never again headline the report as a leak or as a strength — which is exactly
+  // how "vision score is your worst metric" and "ahead in 17 of 18" both got published.
   const ranked = [...comparisons]
-    .filter((c) => c.enoughData && Number.isFinite(c.score))
+    .filter((c) => c.rankable && c.enoughData && Number.isFinite(c.score))
     .sort((a, b) => a.score - b.score);
 
   const wins = mine.filter((r) => r.win === 1).length;
@@ -233,11 +253,26 @@ export function benchmark(db: Db, options: BenchmarkOptions): BenchmarkResult {
         `(mínimo ${MIN_GAMES} partidas tuyas y ${MIN_PEERS} de referencia).`,
     );
   }
+  const blocked = comparisons.filter((c) => !c.rankable).length;
+  if (blocked > 0) {
+    notes.push(
+      `${blocked} métrica(s) quedaron FUERA del ranking por estar contaminadas por el ` +
+        'resultado: KDA, CS/min, daño, muertes y visión suben porque ganás, no al revés. ' +
+        'Se muestran como descripción, nunca como fuga. Para poder rankearlas hay que ' +
+        'fijar un estado de partida (por ejemplo, solo las partidas parejas al minuto 14).',
+    );
+  }
   notes.push(
     'La referencia son los otros jugadores de tus propias partidas, no un promedio de tu ' +
       'división sacado de otro lado. En las métricas por rol eso es tu rival de línea: es la ' +
       'comparación correcta para "dónde pierdo", pero no es una muestra aleatoria de tu elo.',
   );
+  if (options.stratum !== undefined) {
+    notes.push(
+      `Estrato fijo: ${options.stratum}. Dentro de él el efecto bola de nieve está ` +
+        'controlado, así que las métricas contaminadas vuelven a significar algo.',
+    );
+  }
   if (options.role === undefined) {
     notes.push(
       'Sin filtro de rol: las métricas por rol mezclan posiciones y pierden sentido. ' +

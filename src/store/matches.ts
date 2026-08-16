@@ -191,6 +191,46 @@ export function saveMatch(db: Db, flat: FlatMatch, raw: MatchDto): void {
   });
 }
 
+/**
+ * Cached matches that have no timeline row yet, newest first.
+ *
+ * `syncMatches` fetches a timeline only for matches it is downloading for the first time —
+ * the call sits inside the loop over `missing` — so every match cached before timelines were
+ * wanted is permanently without one, and passing `withTimeline` on a later sync does nothing
+ * for them. This is the query that repairs that, and it stays useful afterwards because
+ * `withTimeline` is opt-in per sync, so gaps reappear.
+ *
+ * Remakes are excluded: a four-minute game has nothing to derive.
+ */
+export function matchIdsMissingTimeline(
+  db: Db,
+  q: { puuid?: string; queueId?: number; limit?: number } = {},
+): string[] {
+  const where = ['t.match_id IS NULL', 'm.game_duration >= 300'];
+  const args: (string | number)[] = [];
+
+  if (q.puuid !== undefined) {
+    where.push(
+      'EXISTS (SELECT 1 FROM participants p WHERE p.match_id = m.match_id AND p.puuid = ?)',
+    );
+    args.push(q.puuid);
+  }
+  if (q.queueId !== undefined) {
+    where.push('m.queue_id = ?');
+    args.push(q.queueId);
+  }
+
+  const sql = `SELECT m.match_id
+     FROM matches m LEFT JOIN timelines t ON t.match_id = m.match_id
+     WHERE ${where.join(' AND ')}
+     ORDER BY m.game_creation DESC
+     ${q.limit !== undefined ? 'LIMIT ?' : ''}`;
+  if (q.limit !== undefined) args.push(q.limit);
+
+  const rows = db.prepare(sql).all(...args) as Record<string, unknown>[];
+  return rows.map((r) => String(r['match_id']));
+}
+
 export function saveTimeline(db: Db, matchId: string, raw: TimelineDto): void {
   db.prepare(
     `INSERT INTO timelines (match_id, raw) VALUES (?, ?)

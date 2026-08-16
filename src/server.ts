@@ -16,7 +16,7 @@ import {
   listAccounts,
   queryParticipants,
 } from './store/matches.ts';
-import { resolveAccount, syncMatches } from './sync.ts';
+import { backfillTimelines, resolveAccount, syncMatches } from './sync.ts';
 
 /**
  * MCP server. Registers the seven tools and talks JSON-RPC over stdio.
@@ -223,6 +223,60 @@ server.registerTool(
 
     if (result.errors.length > 0) {
       lines.push('', `Errores (${result.errors.length}):`, ...result.errors.slice(0, 5));
+    }
+    const budget = client.limiter.budget();
+    lines.push(
+      '',
+      `Presupuesto restante: ${budget.map((b) => `${b.remaining}/${b.limit} en ${b.ms / 1000}s`).join(' · ')}`,
+    );
+    return text(lines.join('\n'));
+  },
+);
+
+// ------------------------------------------------------- backfill timelines
+
+server.registerTool(
+  'riot_backfill_timelines',
+  {
+    title: 'Bajar timelines de partidas ya cacheadas',
+    description:
+      'Baja el timeline por minuto de las partidas que YA están en la caché pero no lo ' +
+      'tienen. riot_sync solo trae timeline de las partidas que descarga por primera vez, ' +
+      'así que todo lo bajado antes queda sin timeline para siempre; esto lo repara. ' +
+      'Idempotente y reanudable: lo que ya tiene timeline no se vuelve a pedir. ' +
+      '1 request por partida, ~50 por minuto.',
+    inputSchema: {
+      account: z.string().optional().describe('Limitar a partidas de esta cuenta'),
+      queue: z.enum(['soloq', 'flex', 'draft', 'blind', 'aram', 'all']).default('all'),
+      max: z.number().int().min(1).max(1000).default(100).describe('Tope de timelines a bajar'),
+    },
+  },
+  async ({ account, queue, max }) => {
+    const target = account !== undefined ? requireAccount(account) : null;
+    const client = createClient();
+    const queueId = queueIdFrom(queue);
+
+    const result = await backfillTimelines(client, database(), {
+      ...(target !== null ? { puuid: target.puuid } : {}),
+      ...(queueId !== undefined ? { queueId } : {}),
+      max,
+    });
+
+    if (result.candidates === 0) {
+      return text('No falta ningún timeline con esos filtros. Nada que hacer.');
+    }
+
+    const lines = [
+      `${target?.label ?? 'todas las cuentas'} — cola ${queue}`,
+      `Sin timeline: ${result.candidates} · bajados: ${result.fetched}`,
+      `Tardó ${(result.elapsedMs / 1000).toFixed(1)} s`,
+    ];
+    if (result.errors.length > 0) {
+      lines.push('', `Errores (${result.errors.length}):`, ...result.errors.slice(0, 5));
+    }
+    const pending = result.candidates - result.fetched;
+    if (pending > 0) {
+      lines.push('', `Quedan ${pending}. Volvé a correrlo: es reanudable.`);
     }
     const budget = client.limiter.budget();
     lines.push(

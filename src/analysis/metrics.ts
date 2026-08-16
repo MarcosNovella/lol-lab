@@ -18,12 +18,32 @@ import type { MatchListRow } from '../store/matches.ts';
 
 export type MetricGroup = 'economía' | 'daño' | 'línea' | 'visión' | 'peleas' | 'objetivos';
 
+/**
+ * Whether a metric can be read as a cause of the result or only as a symptom of it (G-008).
+ *
+ * - `causal`      measured before the outcome is decided, so its mean means something on its
+ *                 own. In practice: anything that stops accruing by the end of laning phase.
+ * - `contaminated` downstream of winning. A player who snowballs farms more, deals more damage
+ *                 and dies less BECAUSE he is winning, so an unconditioned mean over these
+ *                 measures "when I win, I win big" and nothing else. Reportable ONLY split by
+ *                 result or inside a fixed game-state stratum.
+ * - `conditional`  only means anything given a state ("conversion from +1500 gold at 14").
+ *
+ * This is the single lesson of the first benchmark: it reported him ahead of his lane
+ * opponent in 17 of 18 metrics while his win rate was 52.8%, because 14 of those 18 are
+ * contaminated and his stomps dominated every mean. Note how few metrics survive as causal —
+ * that scarcity is the honest picture, not a gap in the catalogue.
+ */
+export type Contamination = 'causal' | 'contaminated' | 'conditional';
+
 export type Metric = {
   key: string;
   label: string;
   group: MetricGroup;
   higherIsBetter: boolean;
   roleSpecific: boolean;
+  /** Required, never defaulted: a new metric must be classified deliberately (G-008). */
+  contamination: Contamination;
   decimals: number;
   /** Null means Riot did not report it for this match; the metric skips that row. */
   get: (row: MatchListRow) => number | null;
@@ -34,6 +54,7 @@ export type Metric = {
 export const METRICS: Metric[] = [
   {
     key: 'cs_per_min',
+    contamination: 'contaminated',
     label: 'CS por minuto',
     group: 'economía',
     higherIsBetter: true,
@@ -43,6 +64,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'gold_per_min',
+    contamination: 'contaminated',
     label: 'Oro por minuto',
     group: 'economía',
     higherIsBetter: true,
@@ -52,6 +74,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'cs_first_10',
+    contamination: 'causal',
     label: 'CS a los 10 minutos',
     group: 'línea',
     higherIsBetter: true,
@@ -61,6 +84,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'max_cs_adv_on_lane',
+    contamination: 'contaminated',
     label: 'Máxima ventaja de CS sobre el rival de línea',
     group: 'línea',
     higherIsBetter: true,
@@ -70,6 +94,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'early_lane_adv',
+    contamination: 'causal',
     label: 'Ventaja de oro+XP temprana',
     group: 'línea',
     higherIsBetter: true,
@@ -79,6 +104,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'lane_adv',
+    contamination: 'causal',
     label: 'Ventaja de oro+XP en fase de líneas',
     group: 'línea',
     higherIsBetter: true,
@@ -88,6 +114,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'turret_plates',
+    contamination: 'causal',
     label: 'Placas de torreta',
     group: 'línea',
     higherIsBetter: true,
@@ -97,6 +124,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'damage_per_min',
+    contamination: 'contaminated',
     label: 'Daño a campeones por minuto',
     group: 'daño',
     higherIsBetter: true,
@@ -106,6 +134,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'team_damage_share',
+    contamination: 'contaminated',
     label: 'Porcentaje del daño del equipo',
     group: 'daño',
     higherIsBetter: true,
@@ -116,6 +145,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'damage_taken_per_min',
+    contamination: 'contaminated',
     label: 'Daño recibido por minuto',
     group: 'daño',
     higherIsBetter: false,
@@ -125,6 +155,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'deaths_per_min',
+    contamination: 'contaminated',
     label: 'Muertes por minuto',
     group: 'peleas',
     higherIsBetter: false,
@@ -134,6 +165,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'kill_participation',
+    contamination: 'contaminated',
     label: 'Participación en kills',
     group: 'peleas',
     higherIsBetter: true,
@@ -144,6 +176,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'kda',
+    contamination: 'contaminated',
     label: 'KDA',
     group: 'peleas',
     higherIsBetter: true,
@@ -153,6 +186,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'solo_kills',
+    contamination: 'contaminated',
     label: 'Solo kills',
     group: 'peleas',
     higherIsBetter: true,
@@ -162,6 +196,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'vision_per_min',
+    contamination: 'contaminated',
     label: 'Vision score por minuto',
     group: 'visión',
     higherIsBetter: true,
@@ -171,6 +206,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'control_wards',
+    contamination: 'contaminated',
     label: 'Guardianes de control comprados',
     group: 'visión',
     higherIsBetter: true,
@@ -180,6 +216,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'wards_killed',
+    contamination: 'contaminated',
     label: 'Wards enemigas destruidas',
     group: 'visión',
     higherIsBetter: true,
@@ -189,6 +226,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'damage_objectives',
+    contamination: 'contaminated',
     label: 'Daño a objetivos por partida',
     group: 'objetivos',
     higherIsBetter: true,

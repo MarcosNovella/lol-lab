@@ -100,25 +100,90 @@ export type MatchDto = {
   };
 };
 
+export type Position = { x: number; y: number };
+
+/**
+ * One attacker's contribution to a death, out of `victimDamageReceived` / `victimDamageDealt`.
+ *
+ * This is what makes "was he IN this fight" answerable exactly, including the fights where he
+ * neither killed, assisted nor died: every participant who traded damage with the victim
+ * appears here (ADR-008).
+ */
+export type VictimDamage = {
+  participantId: number;
+  name?: string;
+  basic?: boolean;
+  magicDamage?: number;
+  physicalDamage?: number;
+  trueDamage?: number;
+  spellName?: string;
+  spellSlot?: number;
+  type?: string;
+};
+
+/**
+ * Timeline events, as a single loose shape rather than a discriminated union.
+ *
+ * Riot mixes field sets per `type` and adds fields every patch; the raw JSON is stored whole
+ * (ADR-004), so this only has to be wide enough for the readers. NOTE the absences, measured
+ * across the whole corpus (ADR-008): WARD_PLACED and WARD_KILL carry NO `position` — only
+ * `creatorId`/`killerId`, `wardType` and `timestamp` — so nothing positional about vision can
+ * be built. CHAMPION_KILL and ELITE_MONSTER_KILL always carry both position and timestamp.
+ */
+export type TimelineEvent = {
+  type: string;
+  timestamp: number;
+  participantId?: number;
+  killerId?: number;
+  victimId?: number;
+  creatorId?: number;
+  assistingParticipantIds?: number[];
+  position?: Position;
+  wardType?: string;
+  itemId?: number;
+  monsterType?: string;
+  monsterSubType?: string;
+  killerTeamId?: number;
+  teamId?: number;
+  laneType?: string;
+  buildingType?: string;
+  towerType?: string;
+  killType?: string;
+  bounty?: number;
+  shutdownBounty?: number;
+  killStreakLength?: number;
+  victimDamageReceived?: VictimDamage[];
+  victimDamageDealt?: VictimDamage[];
+};
+
+export type ParticipantFrame = {
+  participantId: number;
+  totalGold?: number;
+  currentGold?: number;
+  goldPerSecond?: number;
+  xp?: number;
+  minionsKilled?: number;
+  jungleMinionsKilled?: number;
+  level?: number;
+  /** Sampled once per frame, i.e. once a MINUTE. Nothing finer is reconstructable (ADR-008). */
+  position?: Position;
+  timeEnemySpentControlled?: number;
+  damageStats?: Record<string, number>;
+  championStats?: Record<string, number>;
+};
+
+export type TimelineFrame = {
+  timestamp: number;
+  participantFrames: Record<string, ParticipantFrame>;
+  events?: TimelineEvent[];
+};
+
 export type TimelineDto = {
   metadata: { matchId: string; participants: string[] };
   info: {
+    /** 60000 on every match measured so far — one frame per minute. */
     frameInterval: number;
-    frames: {
-      timestamp: number;
-      participantFrames: Record<
-        string,
-        {
-          participantId: number;
-          totalGold?: number;
-          currentGold?: number;
-          xp?: number;
-          minionsKilled?: number;
-          jungleMinionsKilled?: number;
-          level?: number;
-        }
-      >;
-    }[];
+    frames: TimelineFrame[];
     participants?: { participantId: number; puuid: string }[];
   };
 };
