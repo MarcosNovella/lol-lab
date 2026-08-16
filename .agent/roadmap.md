@@ -145,10 +145,11 @@ its conclusions.
    the load-bearing assumption of ADR-006. If a pattern candidate ever needs per-match LoL
    data, the seam is wrong and the ADR should be revisited rather than worked around.
 
-7. ~~Nothing from Fase 0 is committed.~~ **DONE** — committed as `28c67fa` on branch
-   `feat/phase-0-timelines-contamination`, verify green, working tree clean. `master` is
-   still at `abf96fd`; the branch is unmerged and there is no remote, so decide whether to
-   merge to master before starting M2 or keep stacking branches.
+7. ~~Nothing from Fase 0 is committed.~~ **DONE** — `28c67fa`, merged fast-forward to
+   `master` (now `8a0018d`), verify green, working tree clean. The merged branch
+   `feat/phase-0-timelines-contamination` still exists pointing at the same commit and can be
+   deleted whenever. STILL OPEN: there is no git remote, so nothing is backed up off this
+   machine — worth creating the GitHub repo the way athlete-os has one (ADR-021 there).
    *(This entry originally said "one commit (684c9e3)", inherited from state.md's S1 log
    without running `git log` — the repo had three. Kept visible rather than quietly fixed: it
    is a small live instance of exactly the error class §4.3 and the session prompt warn

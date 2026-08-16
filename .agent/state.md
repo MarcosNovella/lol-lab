@@ -22,8 +22,8 @@ Log:
   mid-soloq games. Both S1 open questions answered — see Standing.
 - 2026-08-16 S2: planning. Overturned the benchmark's headline conclusion, wrote the plan.
 - 2026-08-16 S3: FASE 0 SHIPPED (M0+M1), verify green 33 -> 59 tests. ADR-006..009,
-  G-008/009/010. Committed as `28c67fa` on branch `feat/phase-0-timelines-contamination`
-  (unmerged; `master` still at `abf96fd`, no remote exists). Details below.
+  G-008/009/010. Committed as `28c67fa` and merged fast-forward to `master`, now at `8a0018d`.
+  No remote exists — there is no backup off this machine. Details below.
 
 Last done: Fase 0 closed.
 - M0: found that `syncMatches` fetches timelines only inside its loop over NEW matches, so
