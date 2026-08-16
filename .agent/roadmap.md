@@ -145,12 +145,14 @@ its conclusions.
    the load-bearing assumption of ADR-006. If a pattern candidate ever needs per-match LoL
    data, the seam is wrong and the ADR should be revisited rather than worked around.
 
-7. **Nothing from Fase 0 is committed.** The repo is at `abf96fd` (3 commits: 684c9e3 init,
-   f23e9c7 docs + .gitattributes, abf96fd fixes-from-real-data) and all of Fase 0 is
-   uncommitted working tree. Commit before building further, so M2 is separable.
-   *(Corrected mid-session: this originally said "one commit (684c9e3)", inherited from
-   state.md's S1 log without running `git log`. A small instance of exactly the error class
-   §4.3 and the session prompt warn about — worth keeping visible rather than quietly fixing.)*
+7. ~~Nothing from Fase 0 is committed.~~ **DONE** — committed as `28c67fa` on branch
+   `feat/phase-0-timelines-contamination`, verify green, working tree clean. `master` is
+   still at `abf96fd`; the branch is unmerged and there is no remote, so decide whether to
+   merge to master before starting M2 or keep stacking branches.
+   *(This entry originally said "one commit (684c9e3)", inherited from state.md's S1 log
+   without running `git log` — the repo had three. Kept visible rather than quietly fixed: it
+   is a small live instance of exactly the error class §4.3 and the session prompt warn
+   about, and it happened while writing the warning.)*
 
 8. **The out-of-sample framing in §1 was overstated twice and is corrected here.** (a) The
    window is not "clean": the finding was reported to Marcos in conversation, so if he starts
