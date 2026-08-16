@@ -12,7 +12,8 @@
     "verify": "biome check . && tsc --noEmit && vitest run",
     "fix": "biome check --write .",
     "test": "vitest",
-    "smoke": "node --disable-warning=ExperimentalWarning scripts/smoke.ts"
+    "smoke": "node --disable-warning=ExperimentalWarning scripts/smoke.ts",
+    "call": "node --disable-warning=ExperimentalWarning scripts/call.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

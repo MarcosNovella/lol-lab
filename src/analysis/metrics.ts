@@ -7,8 +7,13 @@ import type { MatchListRow } from '../store/matches.ts';
  * the problem, and the report has to rank those the other way round or it will congratulate
  * him for dying more than everyone else.
  *
- * `roleSpecific` marks metrics that only make sense against the same role. Comparing a mid
- * laner's CS/min against a support's is noise; comparing vision score is not.
+ * `roleSpecific` marks metrics that may only be compared against the same role. In League
+ * that is ALL of them (G-007). Vision score looked like the exception until a mid laner got
+ * benchmarked against a pool containing supports, who carry two to three times the vision
+ * score by design: it came out as his single worst metric and headlined the report, purely
+ * as an artefact of the pool. Deaths per minute, kill participation and KDA are just as
+ * role-conditioned. The flag stays so a genuine exception can be marked, but the default is
+ * true and widening a pool to buy sample size is how you manufacture a false finding.
  */
 
 export type MetricGroup = 'economía' | 'daño' | 'línea' | 'visión' | 'peleas' | 'objetivos';
@@ -123,7 +128,7 @@ export const METRICS: Metric[] = [
     label: 'Muertes por minuto',
     group: 'peleas',
     higherIsBetter: false,
-    roleSpecific: false,
+    roleSpecific: true,
     decimals: 3,
     get: (r) => r.deathsPerMin,
   },
@@ -132,7 +137,7 @@ export const METRICS: Metric[] = [
     label: 'Participación en kills',
     group: 'peleas',
     higherIsBetter: true,
-    roleSpecific: false,
+    roleSpecific: true,
     decimals: 3,
     unit: '%',
     get: (r) => r.killParticipation,
@@ -142,7 +147,7 @@ export const METRICS: Metric[] = [
     label: 'KDA',
     group: 'peleas',
     higherIsBetter: true,
-    roleSpecific: false,
+    roleSpecific: true,
     decimals: 2,
     get: (r) => r.kda,
   },
@@ -160,7 +165,7 @@ export const METRICS: Metric[] = [
     label: 'Vision score por minuto',
     group: 'visión',
     higherIsBetter: true,
-    roleSpecific: false,
+    roleSpecific: true,
     decimals: 2,
     get: (r) => r.visionPerMin,
   },
@@ -169,7 +174,7 @@ export const METRICS: Metric[] = [
     label: 'Guardianes de control comprados',
     group: 'visión',
     higherIsBetter: true,
-    roleSpecific: false,
+    roleSpecific: true,
     decimals: 2,
     get: (r) => r.controlWards,
   },
@@ -178,7 +183,7 @@ export const METRICS: Metric[] = [
     label: 'Wards enemigas destruidas',
     group: 'visión',
     higherIsBetter: true,
-    roleSpecific: false,
+    roleSpecific: true,
     decimals: 2,
     get: (r) => r.wardsKilled,
   },

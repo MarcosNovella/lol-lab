@@ -66,8 +66,22 @@ describe('benchmark', () => {
     const db = seed(10, 5);
     const result = benchmark(db, { ...OPTS, role: 'MIDDLE' });
     const cs = result.comparisons.find((c) => c.key === 'cs_per_min');
-    // He is behind in all ten, so zero head-to-head wins out of ten games.
-    expect(cs?.headToHead).toEqual({ wins: 0, games: 10, rate: 0 });
+    // He is behind in all ten, so zero head-to-head wins and no ties.
+    expect(cs?.headToHead).toEqual({ wins: 0, ties: 0, games: 10, rate: 0 });
+  });
+
+  it('counts ties separately so a mostly-tied ordinal is not read as losing', () => {
+    // laningPhaseGoldExpAdvantage is an ordinal that sits at 0 in most games. The fixture
+    // gives both players the same value every game, so every game is a tie: reporting that
+    // as "0 wins out of 10" would call an even matchup a defeat.
+    const db = seed(10, 5);
+    const result = benchmark(db, { ...OPTS, role: 'MIDDLE' });
+    const lane = result.comparisons.find((c) => c.key === 'lane_adv');
+    expect(lane?.headToHead?.ties).toBe(10);
+    expect(lane?.headToHead?.games).toBe(10);
+    // Zero decided games must not produce a misleading 0% win rate on 10 games.
+    expect(lane?.headToHead?.rate).toBe(0);
+    if (lane) expect(formatComparison(lane)).toContain('10 empatadas');
   });
 
   it('orients "lower is better" metrics so more deaths is never reported as good', () => {

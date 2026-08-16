@@ -45,8 +45,12 @@ export type MetricComparison = {
    * distributions is never reported as "even" (G-005).
    */
   score: number;
-  /** Share of matches he beat his direct counterpart. Null for role-agnostic metrics. */
-  headToHead: { wins: number; games: number; rate: number } | null;
+  /**
+   * How he did against his direct counterpart, game by game. Null for role-agnostic metrics.
+   * Ties are counted separately: several Riot metrics are ordinals that sit at 0 in most
+   * games, and folding ties into losses makes a strong player look mediocre.
+   */
+  headToHead: { wins: number; ties: number; games: number; rate: number } | null;
   severity: 'crítico' | 'flojo' | 'parejo' | 'fuerte';
   enoughData: boolean;
 };
@@ -171,6 +175,7 @@ export function benchmark(db: Db, options: BenchmarkOptions): BenchmarkResult {
     let headToHead: MetricComparison['headToHead'] = null;
     if (metric.roleSpecific) {
       let wins = 0;
+      let ties = 0;
       let games = 0;
       for (const [matchId, opponent] of opponentByMatch) {
         const myRow = myRowByMatch.get(matchId);
@@ -179,9 +184,13 @@ export function benchmark(db: Db, options: BenchmarkOptions): BenchmarkResult {
         const b = metric.get(opponent);
         if (a === null || b === null) continue;
         games += 1;
-        if (metric.higherIsBetter ? a > b : a < b) wins += 1;
+        if (a === b) ties += 1;
+        else if (metric.higherIsBetter ? a > b : a < b) wins += 1;
       }
-      if (games > 0) headToHead = { wins, games, rate: wins / games };
+      // Rate is out of DECIDED games: a metric that ties in 24 of 36 games says nothing
+      // about the 24, and counting them as losses would be a lie in the other direction.
+      const decided = games - ties;
+      if (games > 0) headToHead = { wins, ties, games, rate: decided > 0 ? wins / decided : 0 };
     }
 
     // Oriented so positive always means "better for him", matching `effect`.
@@ -277,7 +286,8 @@ export function formatComparison(c: MetricComparison): string {
   const arrow = c.score > 0 ? '▲' : c.score < 0 ? '▼' : '=';
   const pct = c.unit === '%' ? (v: number) => `${round(v * 100, 1)}%` : (v: number) => String(v);
   const h2h = c.headToHead
-    ? ` · le ganás al rival de línea en ${c.headToHead.wins}/${c.headToHead.games}`
+    ? ` · vs rival de línea: ganás ${c.headToHead.wins} de ${c.headToHead.games - c.headToHead.ties} decididas` +
+      (c.headToHead.ties > 0 ? ` (${c.headToHead.ties} empatadas)` : '')
     : '';
   // Never print "NaN": say the effect size is undefined and why.
   const effect = Number.isFinite(c.effect)

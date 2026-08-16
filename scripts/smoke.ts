@@ -1,7 +1,7 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 /**
  * Boots the server the same way Claude Code does and exercises the tools that work without
@@ -42,7 +42,13 @@ if (tools.length !== 7) {
   process.exitCode = 1;
 }
 
-show('riot_key_status', (await client.callTool({ name: 'riot_key_status', arguments: {} })) as ToolResult);
-show('riot_cache_status', (await client.callTool({ name: 'riot_cache_status', arguments: {} })) as ToolResult);
+show(
+  'riot_key_status',
+  (await client.callTool({ name: 'riot_key_status', arguments: {} })) as ToolResult,
+);
+show(
+  'riot_cache_status',
+  (await client.callTool({ name: 'riot_cache_status', arguments: {} })) as ToolResult,
+);
 
 await client.close();

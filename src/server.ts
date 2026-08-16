@@ -50,6 +50,20 @@ function localDate(epochMs: number): string {
   return new Date(epochMs).toLocaleDateString('sv-SE', { timeZone: AR_TIME });
 }
 
+/**
+ * HH:MM in Argentina time. Asks Intl for the clock directly instead of slicing a formatted
+ * datetime: es-AR renders 12-hour with a " p. m." suffix, so the obvious `.slice(-5)` prints
+ * the suffix rather than the time (G-006).
+ */
+function localClock(epochMs: number): string {
+  return new Date(epochMs).toLocaleTimeString('es-AR', {
+    timeZone: AR_TIME,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+}
+
 function queueIdFrom(name: QueueName | 'all' | undefined): number | undefined {
   if (name === undefined || name === 'all') return undefined;
   return QUEUE[name];
@@ -263,7 +277,7 @@ server.registerTool(
       const kda = `${r.kills}/${r.deaths}/${r.assists}`;
       return [
         localDate(r.gameCreation).padEnd(11),
-        localTime(r.gameCreation).slice(-5).padEnd(6),
+        localClock(r.gameCreation).padEnd(6),
         queueLabel(r.queueId).padEnd(7),
         r.champion.padEnd(13),
         (r.teamPosition || '—').toLowerCase().padEnd(7),
