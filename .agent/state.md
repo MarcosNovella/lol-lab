@@ -192,12 +192,21 @@ Open questions:
 - Still unverified and believed on trust: ADR-008's ward-position claim (basis of a permanent
   scope cut), the S1 step-4 op.gg cross-check (no record it ever ran), the "+500-1500 small
   leads 4/8 vs 5/7" line, the individual `contamination` labels.
-- **No git remote, and option B just made it matter more.** `vault/_raw/` is gitignored, so
-  `matchup-record.csv` is neither versioned nor backed up — the counters moved from tracked
-  markdown to an ignored directory. Regenerable in principle, but only from `riot-mcp/data/`,
-  which is ALSO gitignored and sits in a repo with no remote, and Riot's match-v5 does not
-  serve history indefinitely. The whole chain is single-machine. Either back up riot-mcp, or
-  un-ignore `_raw/lol/*.csv` in the vault so derived aggregates are versioned while true raw
-  series stay out. Marcos's call; worth doing before more is built on top.
+- ~~No git remote~~ **RESOLVED 2026-08-16**: pushed to https://github.com/MarcosNovella/lol-project
+  (public, master, verified reachable unauthenticated; `.env` absent, only `.env.example`).
+  Six commits from this session. **The VAULT is a different repo and stays local — it holds
+  `10-salud` and `20-finanzas`. It is committed locally and must never be pushed without a
+  separate, explicit instruction.**
+- Still single-machine: `vault/_raw/` is gitignored, so `matchup-record.csv` is not versioned,
+  and `riot-mcp/data/` (the SQLite cache) is gitignored too. Both are regenerable — the CSV from
+  the cache, the cache from Riot — but match-v5 does not serve history indefinitely. Worth
+  either backing up `data/` or un-ignoring `_raw/lol/*.csv`. Marcos's call.
+- Repo still named `riot-mcp` locally while GitHub calls it `lol-project`; the rename to
+  `lol-lab` is still deferred (path wired into `~/.claude.json`).
+- `git config user.name` is unset, so every commit is authored by `unknown <email>`. One line
+  to fix if he wants his name on a public repo.
+- One historical revision (`688c21c`) holds `matchups.ts` as a BINARY blob, from the NUL byte
+  fixed in `ce2d34c`. HEAD is clean text; only that one diff renders as binary. Cosmetic, and
+  now pushed, so cleaning it would mean a force-push.
 - Dev key expires ~14:00 today (pasted 2026-08-16 14:08). Personal key still not arrived.
 - Rename `riot-mcp` → `lol-lab`: deferred to end of week (path wired into `~/.claude.json`).
