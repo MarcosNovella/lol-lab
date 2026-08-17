@@ -42,6 +42,9 @@ export type CollectOptions = {
   role?: Role;
   queueId?: number;
   since?: number;
+  /** Exclusive upper bound on `gameCreation`. Lets the baseline and the out-of-sample window
+   *  be measured by the SAME function, which is the only way the two numbers are comparable. */
+  until?: number;
   minute?: number;
 };
 
@@ -53,12 +56,16 @@ export type CollectResult = {
 
 export function collectStates(db: Db, options: CollectOptions): CollectResult {
   const minute = options.minute ?? STATE_MINUTE;
-  const mine = queryParticipants(db, {
+  const all = queryParticipants(db, {
     puuid: options.puuid,
     ...(options.role !== undefined ? { role: options.role } : {}),
     ...(options.queueId !== undefined ? { queueId: options.queueId } : {}),
     ...(options.since !== undefined ? { since: options.since } : {}),
   });
+  // `until` is exclusive, unlike the store's inclusive `until`, so that [a, b) and [b, ∞)
+  // partition the timeline with no game landing on both sides.
+  const until = options.until;
+  const mine = until === undefined ? all : all.filter((r) => r.gameCreation < until);
 
   const rows: StateRow[] = [];
   const skipped = { noTimeline: 0, endedBeforeMinute: 0 };
@@ -154,8 +161,23 @@ export function conversionByBand(
   return bands.map((band) => conversionAtBand(rows, band));
 }
 
-/** True when every band in the sweep agrees on the sign of (his conversion − theirs). */
-export function conversionIsRobust(sweep: ConversionAtBand[]): boolean {
+/**
+ * True when every band in the sweep agrees on a NON-ZERO sign of (his conversion − theirs).
+ *
+ * Named for the one knob it actually turns. It used to be called `conversionIsRobust`, which
+ * overclaimed twice over (G-011, G-012):
+ *
+ * - The band is not the only arbitrary parameter, and it is the weak one. Sweeping 300→1000
+ *   moves the sample from 22 games to 15; sweeping the MINUTE genuinely re-shuffles which
+ *   games land in which bucket. The minute-14 finding passed this check and then failed a
+ *   minute sweep, flipping sign at 12 and 16, its two immediate neighbours. Passing here means
+ *   "the gold cut did not manufacture this" and nothing more.
+ * - It returned true for a gap of exactly zero, because `Math.sign(0)` is 0 and a one-element
+ *   set passes an agreement test. Agreement on nothing is not evidence, so zero is now
+ *   rejected explicitly.
+ */
+export function conversionSurvivesBandSweep(sweep: ConversionAtBand[]): boolean {
+  if (sweep.length === 0) return false;
   const signs = sweep
     .map((s) => {
       const mine = s.buckets.find((b) => b.bucket === 'arriba');
@@ -165,7 +187,9 @@ export function conversionIsRobust(sweep: ConversionAtBand[]): boolean {
       return Math.sign(mine.rate - s.opponentFromAhead.rate);
     })
     .filter((s): s is number => s !== null);
-  return signs.length === sweep.length && new Set(signs).size === 1;
+  if (signs.length !== sweep.length) return false;
+  if (new Set(signs).size !== 1) return false;
+  return signs[0] !== 0;
 }
 
 export const DEFAULT_BAND = EVEN_GOLD_BAND;

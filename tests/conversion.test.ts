@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   conversionAtBand,
   conversionByBand,
-  conversionIsRobust,
+  conversionSurvivesBandSweep,
   type StateRow,
 } from '../src/analysis/conversion.ts';
 
@@ -54,15 +54,37 @@ describe('conversion by game state', () => {
     expect(sweep[2]?.buckets.find((b) => b.bucket === 'pareja')?.games).toBe(2);
   });
 
-  it('calls a finding robust only when every band agrees on its direction', () => {
+  it('blesses a band sweep only when every band agrees on a direction', () => {
+    // He converts 1 of 2 from ahead; his opponents 2 of 2 from theirs. A real gap, same sign
+    // at both bands.
     const agree = conversionByBand(
-      [row(2000, true), row(2500, true), row(-2000, false), row(-2500, false)],
+      [row(2000, true), row(2500, false), row(-2000, false), row(-2500, false)],
       [300, 500],
     );
-    expect(conversionIsRobust(agree)).toBe(true);
+    expect(conversionSurvivesBandSweep(agree)).toBe(true);
 
     // Band 1000 empties the "arriba" bucket, so the sweep can no longer speak with one voice.
     const mixed = conversionByBand([row(600, true), row(-600, false)], [300, 1000]);
-    expect(conversionIsRobust(mixed)).toBe(false);
+    expect(conversionSurvivesBandSweep(mixed)).toBe(false);
+  });
+
+  it('refuses to bless a gap of exactly zero, however unanimous the bands are (G-012)', () => {
+    // Both rates are 1.0 at every band: the sweep "agrees" on a difference of nothing. The old
+    // implementation returned true here — Math.sign(0) is 0 and one distinct sign passed the
+    // agreement test — so a finding of no difference was reported as a robust finding.
+    const noGap = conversionByBand(
+      [row(2000, true), row(2500, true), row(-2000, false), row(-2500, false)],
+      [300, 500],
+    );
+    for (const band of noGap) {
+      const mine = band.buckets.find((b) => b.bucket === 'arriba');
+      expect(mine?.rate).toBe(1);
+      expect(band.opponentFromAhead.rate).toBe(1);
+    }
+    expect(conversionSurvivesBandSweep(noGap)).toBe(false);
+  });
+
+  it('is false for an empty sweep rather than vacuously true', () => {
+    expect(conversionSurvivesBandSweep([])).toBe(false);
   });
 });

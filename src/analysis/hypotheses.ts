@@ -1,0 +1,361 @@
+import { createHash } from 'node:crypto';
+import type { Db } from '../store/db.ts';
+import type { Role } from './metrics.ts';
+
+/**
+ * The hypothesis ledger: out-of-sample or nothing.
+ *
+ * Every finding the engine surfaces is registered as a dated PREDICTION and evaluated only
+ * against games played after that moment. It is the only defence that works against
+ * overfitting 36 games, and it is the same discipline as the vault's rule for `posicion` —
+ * write the invalidation condition BEFORE you store the belief.
+ *
+ * Two things here are not in the original plan and were added after the 2026-08-16 audit,
+ * because the audit showed they are load-bearing rather than nice to have:
+ *
+ * 1. The ledger freezes the ANALYSIS SPEC, not just the claim (G-013). The Fase 0 finding
+ *    survived a sweep of the gold band and failed a sweep of the minute — a knob nobody had
+ *    turned. An evaluation that may re-choose the minute, band, role, queue, account or
+ *    outcome variable inherits exactly the degrees of freedom that manufactured the finding.
+ * 2. Registration takes a TIMESTAMP and carries TWO boundaries, so the games played between
+ *    "the finding existed" and "the finding was registered" land in a declared, counted hole
+ *    instead of quietly joining whichever side flatters the claim.
+ */
+
+export type OutcomeVariable = 'binary_win' | 'delta_gold_6min';
+
+/**
+ * Which slice of games the effect is measured over, on top of the lane state itself.
+ * `none` means the spec's own bucketing decides; the others fix a stratum so a contaminated
+ * comparison cannot be run unconditioned (G-008).
+ */
+export type Stratum = 'none' | 'lane_ahead' | 'lane_even_or_behind';
+
+/**
+ * Everything that can change the number. Every field is REQUIRED and explicitly nullable
+ * rather than optional: an absent key and a null key must not hash differently, or the
+ * guarantee in G-013 leaks through the shape of the object.
+ */
+export type AnalysisSpec = {
+  /** Performance never pools across accounts, so a hypothesis is bound to exactly one. */
+  puuid: string;
+  role: Role;
+  queueId: number;
+  minute: number;
+  band: number;
+  outcome: OutcomeVariable;
+  stratum: Stratum;
+  champion: string | null;
+};
+
+/**
+ * The canonical key order. Listed by hand so the hash is stable across engines, since
+ * `JSON.stringify` follows insertion order and callers build specs in whatever order they like.
+ */
+const SPEC_KEYS = [
+  'band',
+  'champion',
+  'minute',
+  'outcome',
+  'puuid',
+  'queueId',
+  'role',
+  'stratum',
+] as const;
+
+type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+
+/**
+ * Type-level guarantee for G-013: adding a field to `AnalysisSpec` without listing it in
+ * `SPEC_KEYS` fails `tsc`. Without this the hash would silently ignore the new knob, which is
+ * precisely the failure the ledger exists to prevent.
+ */
+export type SpecKeysCoverEveryField = Exact<(typeof SPEC_KEYS)[number], keyof AnalysisSpec>;
+
+export function canonicalSpec(spec: AnalysisSpec): string {
+  const ordered: Record<string, unknown> = {};
+  for (const key of SPEC_KEYS) ordered[key] = spec[key];
+  return JSON.stringify(ordered);
+}
+
+export function specHash(spec: AnalysisSpec): string {
+  return createHash('sha256').update(canonicalSpec(spec)).digest('hex').slice(0, 16);
+}
+
+export type Direction = 'lower' | 'higher' | 'none';
+
+export type Verdict = 'insufficient_n' | 'consistent' | 'inconsistent' | 'no_effect';
+
+export type Hypothesis = {
+  id: string;
+  registeredAt: number;
+  claim: string;
+  direction: Direction;
+  spec: AnalysisSpec;
+  specHash: string;
+  baselineUntil: number;
+  testFrom: number;
+  gapGames: number;
+  baselineN: number;
+  baselineEffect: number;
+  nNeeded: number;
+  caveat: string;
+  retiredAt: number | null;
+  retiredReason: string | null;
+};
+
+export type RegisterInput = {
+  id: string;
+  claim: string;
+  direction: Direction;
+  spec: AnalysisSpec;
+  baselineUntil: number;
+  testFrom: number;
+  /** Games that fall in the declared hole between the two boundaries. Counted, never assumed. */
+  gapGames: number;
+  baselineN: number;
+  baselineEffect: number;
+  nNeeded: number;
+  caveat: string;
+};
+
+export class LedgerError extends Error {}
+
+/**
+ * NaN means "not measurable" everywhere in this codebase, and it does NOT survive SQLite:
+ * `node:sqlite` binds it as NULL. These two map it across the boundary explicitly in both
+ * directions (G-014). The read side matters most — `Number(null)` is 0, so the lazy path
+ * would turn "we could not measure this" into "the effect is exactly zero", which is the
+ * precise confusion G-005 was written about.
+ */
+const effectToDb = (value: number): number | null => (Number.isFinite(value) ? value : null);
+
+const effectFromDb = (value: unknown): number =>
+  value === null || value === undefined ? Number.NaN : Number(value);
+
+/**
+ * Registers a prediction. Refuses rather than repairs: every rejection here is a case where
+ * accepting the row would make a later evaluation dishonest in a way nobody would notice.
+ */
+export function registerHypothesis(
+  db: Db,
+  input: RegisterInput,
+  now: number = Date.now(),
+): Hypothesis {
+  if (!/^[a-z][a-z0-9_]*$/.test(input.id)) {
+    throw new LedgerError(`hypothesis id must be a lowercase slug, got '${input.id}'`);
+  }
+  if (input.testFrom < input.baselineUntil) {
+    throw new LedgerError(
+      'testFrom is before baselineUntil: the baseline and the out-of-sample window would overlap, ' +
+        'so the same games would both produce and confirm the finding',
+    );
+  }
+  if (input.baselineN <= 0) throw new LedgerError('baselineN must be positive');
+  if (input.nNeeded <= 0) throw new LedgerError('nNeeded must be positive');
+  if (input.gapGames < 0) throw new LedgerError('gapGames cannot be negative');
+  if (input.caveat.trim() === '') {
+    throw new LedgerError('caveat is required: a finding with no stated weakness is not honest');
+  }
+  if (getHypothesis(db, input.id) !== null) {
+    throw new LedgerError(
+      `hypothesis '${input.id}' already exists; the ledger is append-only, register a new id`,
+    );
+  }
+
+  const hash = specHash(input.spec);
+  db.prepare(
+    `INSERT INTO hypotheses (
+       id, registered_at, claim, direction, spec, spec_hash, baseline_until, test_from,
+       gap_games, baseline_n, baseline_effect, n_needed, caveat
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    input.id,
+    now,
+    input.claim,
+    input.direction,
+    canonicalSpec(input.spec),
+    hash,
+    input.baselineUntil,
+    input.testFrom,
+    input.gapGames,
+    input.baselineN,
+    effectToDb(input.baselineEffect),
+    input.nNeeded,
+    input.caveat,
+  );
+
+  const saved = getHypothesis(db, input.id);
+  if (saved === null) throw new LedgerError(`failed to register '${input.id}'`);
+  return saved;
+}
+
+function rowToHypothesis(r: Record<string, unknown>): Hypothesis {
+  return {
+    id: String(r['id']),
+    registeredAt: Number(r['registered_at']),
+    claim: String(r['claim']),
+    direction: String(r['direction']) as Direction,
+    spec: JSON.parse(String(r['spec'])) as AnalysisSpec,
+    specHash: String(r['spec_hash']),
+    baselineUntil: Number(r['baseline_until']),
+    testFrom: Number(r['test_from']),
+    gapGames: Number(r['gap_games']),
+    baselineN: Number(r['baseline_n']),
+    baselineEffect: effectFromDb(r['baseline_effect']),
+    nNeeded: Number(r['n_needed']),
+    caveat: String(r['caveat']),
+    retiredAt: r['retired_at'] === null ? null : Number(r['retired_at']),
+    retiredReason: r['retired_reason'] === null ? null : String(r['retired_reason']),
+  };
+}
+
+export function getHypothesis(db: Db, id: string): Hypothesis | null {
+  const row = db.prepare('SELECT * FROM hypotheses WHERE id = ?').get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return row ? rowToHypothesis(row) : null;
+}
+
+export function listHypotheses(db: Db, includeRetired = false): Hypothesis[] {
+  const sql = includeRetired
+    ? 'SELECT * FROM hypotheses ORDER BY registered_at'
+    : 'SELECT * FROM hypotheses WHERE retired_at IS NULL ORDER BY registered_at';
+  return (db.prepare(sql).all() as Record<string, unknown>[]).map(rowToHypothesis);
+}
+
+export type Measurement = { n: number; effect: number };
+
+/** Half-open `[from, until)`, so the baseline and the test window cannot share a game. */
+export type Window = { from: number; until: number };
+
+/**
+ * Runs the frozen spec over a window.
+ *
+ * It takes a window rather than just a start so the BASELINE effect and the out-of-sample
+ * effect come out of the same function under the same spec. Computing the baseline by some
+ * other route is how you end up comparing two numbers that were never comparable.
+ */
+export type Measure = (spec: AnalysisSpec, window: Window) => Measurement;
+
+export type Evaluation = {
+  hypothesisId: string;
+  evaluatedAt: number;
+  puuid: string;
+  elo: string | null;
+  n: number;
+  effect: number;
+  verdict: Verdict;
+};
+
+/**
+ * The honesty rule, and the reason this function exists at all.
+ *
+ * Below `nNeeded` the verdict is `insufficient_n` and NOTHING else — the effect is still
+ * recorded so the trend is visible, but no direction may be claimed from it. At his volume
+ * these hypotheses will read `insufficient_n` for months; that is the correct answer, not a
+ * failure of the tool. A ledger that hands out verdicts early is a ledger that launders noise.
+ *
+ * An effect of exactly zero is `no_effect`, never `consistent` (G-012): agreement with a
+ * direction requires a sign, and zero has none.
+ */
+export function verdictFor(
+  direction: Direction,
+  effect: number,
+  n: number,
+  nNeeded: number,
+): Verdict {
+  if (n < nNeeded) return 'insufficient_n';
+  if (!Number.isFinite(effect) || effect === 0) return 'no_effect';
+  if (direction === 'none') return 'no_effect';
+  const wanted = direction === 'lower' ? -1 : 1;
+  return Math.sign(effect) === wanted ? 'consistent' : 'inconsistent';
+}
+
+/**
+ * Evaluates a registered hypothesis, refusing any spec that is not the one it was registered
+ * with (G-013). The caller must pass the spec explicitly rather than have it read from the
+ * row, so that a drifted call site fails loudly instead of silently measuring something else.
+ */
+export function evaluateHypothesis(
+  db: Db,
+  id: string,
+  spec: AnalysisSpec,
+  measure: Measure,
+  options: { elo?: string | null; now?: number } = {},
+): Evaluation {
+  const hypothesis = getHypothesis(db, id);
+  if (hypothesis === null) throw new LedgerError(`no hypothesis '${id}'`);
+  if (hypothesis.retiredAt !== null) {
+    throw new LedgerError(`hypothesis '${id}' is retired and may not be evaluated again`);
+  }
+
+  const hash = specHash(spec);
+  if (hash !== hypothesis.specHash) {
+    throw new LedgerError(
+      `spec mismatch for '${id}': registered ${hypothesis.specHash}, got ${hash}. ` +
+        'A hypothesis is evaluated under the spec it was registered with or not at all (G-013).',
+    );
+  }
+
+  const { n, effect } = measure(spec, {
+    from: hypothesis.testFrom,
+    until: Number.POSITIVE_INFINITY,
+  });
+  const evaluation: Evaluation = {
+    hypothesisId: id,
+    evaluatedAt: options.now ?? Date.now(),
+    puuid: spec.puuid,
+    elo: options.elo ?? null,
+    n,
+    effect,
+    verdict: verdictFor(hypothesis.direction, effect, n, hypothesis.nNeeded),
+  };
+
+  db.prepare(
+    `INSERT INTO hypothesis_evaluations (hypothesis_id, evaluated_at, puuid, elo, n, effect, verdict)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    evaluation.hypothesisId,
+    evaluation.evaluatedAt,
+    evaluation.puuid,
+    evaluation.elo,
+    evaluation.n,
+    effectToDb(evaluation.effect),
+    evaluation.verdict,
+  );
+  return evaluation;
+}
+
+export function evaluationsOf(db: Db, id: string): Evaluation[] {
+  const rows = db
+    .prepare('SELECT * FROM hypothesis_evaluations WHERE hypothesis_id = ? ORDER BY evaluated_at')
+    .all(id) as Record<string, unknown>[];
+  return rows.map((r) => ({
+    hypothesisId: String(r['hypothesis_id']),
+    evaluatedAt: Number(r['evaluated_at']),
+    puuid: String(r['puuid']),
+    elo: r['elo'] === null ? null : String(r['elo']),
+    n: Number(r['n']),
+    effect: effectFromDb(r['effect']),
+    verdict: String(r['verdict']) as Verdict,
+  }));
+}
+
+/** The one permitted mutation: mark a hypothesis dead so it stops being surfaced. */
+export function retireHypothesis(
+  db: Db,
+  id: string,
+  reason: string,
+  now: number = Date.now(),
+): void {
+  if (reason.trim() === '') throw new LedgerError('a retirement needs a reason');
+  const hypothesis = getHypothesis(db, id);
+  if (hypothesis === null) throw new LedgerError(`no hypothesis '${id}'`);
+  if (hypothesis.retiredAt !== null) throw new LedgerError(`'${id}' is already retired`);
+  db.prepare('UPDATE hypotheses SET retired_at = ?, retired_reason = ? WHERE id = ?').run(
+    now,
+    reason,
+    id,
+  );
+}
