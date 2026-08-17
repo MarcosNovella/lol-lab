@@ -6,13 +6,84 @@ rather than inheriting it.
 
 ---
 
+## 0. AUDIT 2026-08-16 S4 — measured, not inherited. Read before §1.
+
+Every number below was recomputed against the cache this session, not carried over.
+
+**A1. The conversion gap does NOT survive a minute sweep — the test §4.1 asked for and S3
+never ran.** Sign of (his conversion − theirs) at band 500, across the whole 36-game corpus:
+
+```
+min   8   10   12   14   16   18   20   25
+gap   +    +    +    −    +    +    −    −
+```
+
+It is negative at 14 and positive at 12 and 16, its two immediate neighbours — and 16/18 hold
+MORE games in the opponent bucket (11) than 14 does (10). The continuous outcome (Δgold over
+the 6 min after the state) flips at the same place: d = −0.15, −0.38, −0.16, **−0.14**, +0.28,
++0.39, +0.20 for base minutes 8→20. Magnitude: the opponent bucket is 8/10, so **one game
+erases the whole 10-point gap**. The band sweep does survive, but it is the weak test — band
+300→1000 moves n from 22 to 15, while the minute genuinely re-shuffles membership.
+Fair counter, recorded: 14 is theoretically motivated (laning ends) so other minutes are
+arguably different questions. It does not rescue the finding — the project's own standard for
+the band (`state.ts:34`, "a conclusion that only survives at one cut is not a conclusion")
+applies at least as hard to the minute, which is no less arbitrary.
+=> The claim becomes: *at n=20/10 the sign is not determined by the data.* Register it that
+way. This does not cancel §1, it sharpens what §1 registers.
+
+**A2. Diana is mischaracterised in §3.1 and in state.md.** "Converts a lead worst (6/9)" is
+one game away from Locke's 8/11 — no signal there. The real split: **Diana 0/5 from
+even-or-behind (0/2 even, 0/3 behind); all 6 of her wins come from already being ahead.**
+Locke goes 3/7 in those same states. Diana's problem is not conversion, it is that she
+produces nothing when the state is not handed to her — which is a different, more actionable
+claim and lands squarely on the plan's "the leak is the even game".
+
+**A3. `teamGoldDiff` contains his own lane pair**, so "team state" and "lane state" are not
+independent: r = 0.65, and net of the lane pair his teammates are +605 when he wins lane vs
++47 when he loses it. The 12/15 vs 2/5 split stays valid (it compares within lane-ahead), but
+the variable should become `restOfTeamGoldDiff` BEFORE M2 builds `state_curve` on it.
+
+**A4. `conversionIsRobust` blesses a gap of exactly zero** — `Math.sign(0)` is 0 and `{0}` has
+size 1, so it returns `true` for "no difference at all". `tests/conversion.test.ts:57-67` pins
+it with a fixture where both rates are 1.0, so the test is green for the wrong reason. Fix
+under R7: assert consistent sign AND non-zero. Note this is the OPPOSITE of the worry in §4.5.
+
+**A5. The opponent baseline is derived, not measured**: gap = P(win|ahead) + P(win|behind) − 1.
+`conversion.ts:105-115` says so plainly; state.md narrated it as two samples. Valid under
+symmetry, but it means the opponent-quality confound (§4.3) is bigger than recorded, not
+smaller — there is no opponent measurement in it at all.
+
+**Verified exact** (ran the query): 36/36 have a minute-14 state, skip 0/0 · 14/20 and 8/10 ·
+mean leads 1871 vs 1410 · 12/15 vs 2/5 by team state · Diana 6/14, Locke 11/18 · band sweep
+all-negative · 67 timelines, the 4 missing all remakes (68s, 68s, 83s, 263s) so coverage is
+complete in practice · `pnpm verify` green, 59 tests.
+
+**NOT verified, still believed on trust**: the "small leads +500-1500: he 4/8, opponents 5/7"
+line in state.md · ADR-008's ward-position claim (0 of 13457), which is the basis of a
+permanent scope cut · the S1 step-4 op.gg cross-check (still no record it ever ran) · the
+individual `contamination` labels in §4.4.
+
+---
+
 ## 1. Do this FIRST, it is time-critical
 
 **Register the conversion finding as a formal hypothesis, dated, BEFORE more games arrive.**
+*(Revised by §0 — register the honest version, and freeze the spec.)*
 
 The Fase 0 finding (he converts a minute-14 lead 70%, his opponents 80%) rests on n=20 and
-n=10. The plan's answer to exactly this is the Fase 3 hypothesis ledger: every finding is
-registered as a dated PREDICTION and evaluated ONLY against games played after that date.
+n=10, and §0/A1 shows the sign flips with the minute. The plan's answer to exactly this is the
+Fase 3 hypothesis ledger: every finding is registered as a dated PREDICTION and evaluated ONLY
+against games played after that date.
+
+**NEW REQUIREMENT from the audit — the ledger must freeze the ANALYSIS SPEC, not just the
+claim.** The plan (`lol-lab-plan.md:313`) stores date · claim · metric · direction · effect ·
+n_needed. A1 proves the missing fields are load-bearing: **minute, band, role, queue, account,
+outcome variable**. Without them the out-of-sample evaluation inherits exactly the researcher
+degrees of freedom that manufactured the finding. One extra column, half the value of Fase 3.
+
+**Be honest in `n_needed`.** d ≈ 0.14–0.38 needs ~175 per group at 80% power; at ~6 ahead-games
+a week that is months, not this smurf week. Put that in the field rather than in a footnote —
+registering now buys an honest clock, not a verdict (§4.8 already said this; make it a column).
 
 This is time-critical because of a lucky accident. Marcos chose to RECORD and not DIRECT his
 last smurf week, so the games he plays right now are untouched by the finding — a genuine
@@ -35,6 +106,14 @@ Register at minimum:
 ## 2. Build queue
 
 Tasks #3-#6 exist in the task list. State as of session end:
+
+**M2 — DONE 2026-08-16.** `events.ts` · `moments.ts` (deaths, fights, the 3 most expensive
+moments) · `curve.ts` (state_curve, phases) · `macro.ts` (objectives, vision timing, tempo,
+roams). Cut and NOT deferred, each for a measured reason: ward heatmaps and "died in the dark"
+(no ward positions exist, ADR-008), item completion timings (no Data Dragon cached, so a
+component cannot be told from a legendary), "was he alive at the objective" (needs the respawn
+formula — replaced by "died within 30s before", which is measured). Fase 5 UI also shipped early
+at his request, ADR-014. Original scope below, kept for the record:
 
 **M2 — derived event layer from timelines** (next up, biggest piece)
 Tables and parsers, all derived-immutable like the matches themselves:
@@ -64,11 +143,28 @@ main's first ranked game)
 - Machine-checked guardrail, REVISED: a statistic spanning more than one `puuid` must emit
   the per-account breakdown; the test fails if it returns only the merged aggregate. The
   earlier "may not span two puuid at all" is wrong and was overruled — see §5.
-- **Season growth curve**: game by game across both accounts, account boundary marked, with
-  rank/MMR drawn underneath the metric. Marcos asked for this explicitly and it is a
-  deliverable, not a concession.
-- Matchups: own history + op.gg meta prior + shrinkage proportional to n.
-- `lol prep <enemy champ>`.
+- ~~**Season growth curve**: game by game across both accounts~~ — **STALE, and it contradicts
+  §5b, which is the settled version.** §5b withdrew the merged cross-account curve after Marcos
+  accepted the elo confound: growth tracking stays, but PER ACCOUNT. This bullet survived from
+  before that and would have been inherited as a deliverable. Fixed 2026-08-16; do not
+  resurrect the merged curve without raising the confound again.
+- ~~Matchups: own history + op.gg meta prior + shrinkage proportional to n.~~ **DONE
+  2026-08-16** — `src/analysis/prep.ts`. Shrinkage weight swept per G-011, own record scoped to
+  one account, reps pooled, `confidenceOf` says what the n does and does not allow.
+- ~~`lol prep <enemy champ>`.~~ **DONE** — `scripts/prep.ts`.
+- ~~Machine-checked cross-account guardrail~~ **DONE** — `MATCHUP_PERSPECTIVE` + `pool()` in
+  `src/analysis/matchups.ts`, pinned in `tests/prep.test.ts`.
+- ~~STILL OPEN in M4: per-account growth tracking~~ **DONE 2026-08-16** —
+  `src/analysis/growth.ts` + `scripts/growth.ts`. Cannot span accounts by construction (takes
+  one puuid). Refuses a non-causal metric (G-008). ADR-012 records why the underlay is the
+  opponent's absolute level rather than rank: **match-v5 carries no rank/tier/LP/MMR on any of
+  its 156 participant keys**, verified, so §5b's "draw rank underneath" is not buildable
+  retroactively at all.
+- **M4 is closed except for one thing Marcos may want**: league-v4 is already wired
+  (`getLeagueEntriesByPuuid`) but nothing snapshots it. A rank series can only start from the
+  day we begin recording, so every day without it is a day of curve that can never be
+  annotated with a real division — the same shape as athlete-os's 56-day clock. Cheap: one
+  table, one call per sync.
 
 **M5 — daily export to athlete-os** (build early, read late)
 4-6 metric_keys through the existing `import_observations` RPC. athlete-os's pattern unlock
@@ -83,17 +179,25 @@ page for the gold curve and death map) only if Marcos asks.
 
 ## 3. Needs Marcos in the room
 
-1. **Diana.** 43% win rate, 39% of his games, converts a lead worst (6/9), 0/3 from behind.
-   Small n, real direction. Before the main climbs: does Diana belong in the main's pool at
-   all during a climb, given the main's whole point is consistency and variance-reduction?
-   This is his call, not the software's — but it should be put to him with the numbers.
+1. **Diana.** 43% win rate (6/14), 39% of his games. *(Question restated 2026-08-16 S4 — the
+   old framing "converts a lead worst (6/9)" is one game from Locke's 8/11 and is not a
+   finding; see §0/A2.)* The real number: **Diana 0/5 from even-or-behind, all 6 wins from
+   already being ahead**, against Locke's 3/7 in those states. So the question to put to him
+   is not "does she convert" but: during a climb whose whole point is consistency, does a
+   champion that produces nothing from a neutral start belong in the main's pool? His call,
+   not the software's — but it should be put to him with these numbers, not the old ones.
 2. **Day 1 of the main.** What does he actually get told before and after his first ranked
    games? The peer-relative benchmark works from game 1 (needs no history), matchup priors do
    not. Needs a decided ritual, not an assumption.
-3. **The op.gg cross-check from S1 step 4 was never confirmed to have run.** It is the only
-   end-to-end verification that the pipeline agrees with an independent source. Cheap to
-   redo against `vault/_raw/lol/opgg-matches-2026-08-14.csv`. Worth doing before more is
-   built on top.
+3. ~~**The op.gg cross-check from S1 step 4 was never confirmed to have run.**~~ **DONE
+   2026-08-16, and it PASSES.** All 8 champion totals reconcile exactly against
+   `opgg-champion-pool-2026-08-14.csv`, and all 20 games in `opgg-matches-2026-08-14.csv` match
+   the cache. Three alignments were required and each is worth keeping: (a) op.gg timestamps
+   the game END, the cache stores `gameCreation`, so a naive time join scores 0/20 on games
+   that are identical — the offsets are the durations; (b) op.gg excludes remakes, the cache
+   keeps them (Diana had 2 one-minute remakes, Senna 1, and Senna's counted as a WIN, which is
+   exactly the kind of row that inflates a rate); (c) the cache was missing 6 flex games, now
+   backfilled — smurf ranked history is complete at 69 (51 soloq + 18 flex).
 4. **The vault write path is undesigned.** Which frontmatter keys the engine may touch, and
    how vault rule 2 (contradiction is never overwritten, it is surfaced) is honoured
    mechanically. Do not write to the vault before this is agreed.
@@ -110,10 +214,11 @@ page for the gold curve and death map) only if Marcos asks.
 Written deliberately so the next session argues with its predecessor instead of inheriting
 its conclusions.
 
-1. **The 14-minute choice got the scrutiny the gold band got, and then didn't.** The band is
-   swept across 300/500/750/1000 precisely because it is arbitrary — but STATE_MINUTE = 14
-   was picked by reasoning and never swept at all. That is inconsistent. Sweep 10/12/14/16/20
-   and check the conversion gap survives. If it only exists at 14, it is an artefact.
+1. ~~**The 14-minute choice got the scrutiny the gold band got, and then didn't.**~~
+   **RESOLVED 2026-08-16 S4 — the sweep was run and the finding FAILED it.** Full result in
+   §0/A1: the gap is negative at 14 and positive at 12 and 16. This entry was right to exist
+   and right to be suspicious; the next session should not re-run it, it should build the
+   sweep into the report so no future finding can skip it.
 
 2. **Binary win/loss wastes information at n=20.** "Conversion" is currently a coin flip per
    game. A continuous outcome — Δgold over the 6 minutes after the state, or gold diff at 20
@@ -136,10 +241,10 @@ its conclusions.
    The class is defined as "measurable before the outcome is decided", which is temporal, not
    exogeneity. If that definition is the wrong one, fix the definition, not the labels.
 
-5. **`conversionIsRobust` requires every band to agree in sign, which is strict enough to be
-   brittle.** With an empty bucket at one band it returns false even when the finding is
-   fine. It has a test pinning that behaviour; if it proves annoying in practice, change the
-   rule deliberately rather than loosening the test (R7).
+5. ~~**`conversionIsRobust` ... is strict enough to be brittle.**~~ **WRONG DIRECTION, and the
+   real defect is the opposite — see §0/A4.** On the real data it returns `true`, and it also
+   returns `true` for a gap of exactly zero. It is too LENIENT, not too strict. Fix under R7:
+   the test must assert consistent sign AND non-zero, which covers more than it does today.
 
 6. **The three-layer split assumes athlete-os only ever needs 4-6 numbers a day.** That is
    the load-bearing assumption of ADR-006. If a pattern candidate ever needs per-match LoL
