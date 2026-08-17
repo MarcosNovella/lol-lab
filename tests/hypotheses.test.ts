@@ -79,6 +79,31 @@ describe('the analysis spec is frozen', () => {
     expect(specHash({ ...SPEC, champion: 'Diana' })).not.toBe(base);
   });
 
+  it('produces a STABLE hash, pinned, so a refactor cannot orphan a registered hypothesis', () => {
+    // Hypotheses registered against real games carry their hash in the database. If a refactor
+    // moves the canonicalisation, the ledger silently stops being able to evaluate a hypothesis
+    // it already accepted — G-013's failure arriving through the back door. The real specs are
+    // not pinned here because they carry a real puuid and this repo is public; pinning the
+    // algorithm on a fixture protects them transitively, since any change that moved one would
+    // move this too.
+    expect(specHash(SPEC)).toBe('1b634e6e9e5c69f0');
+  });
+
+  it('gives a differently shaped spec its own hash without touching the others', () => {
+    // Adding a new KIND of hypothesis used to be impossible: the hash walked a fixed global key
+    // list, so a new field would have rewritten every existing hash.
+    const lane = specHash(SPEC);
+    const vision = specHash({
+      puuid: 'p-smurf',
+      role: 'MIDDLE',
+      queueId: 420,
+      windowSeconds: 60,
+      onlyUncredited: true,
+    });
+    expect(vision).not.toBe(lane);
+    expect(specHash(SPEC)).toBe(lane);
+  });
+
   it('refuses to evaluate under a spec that is not the registered one (G-013)', () => {
     registerHypothesis(db, BASE, 1500);
     // The minute is exactly the knob that was never swept and that broke the finding.

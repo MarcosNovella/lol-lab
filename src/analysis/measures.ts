@@ -1,10 +1,14 @@
 import type { Db } from '../store/db.ts';
+import { getRawMatch, getRawTimeline, queryParticipants } from '../store/matches.ts';
 import { collectStates, type StateRow } from './conversion.ts';
+import { eventsOfType, participantsOf } from './events.ts';
 import {
   type AnalysisSpec,
   LedgerError,
   type Measure,
   type Measurement,
+  type Spec,
+  type VisionSpec,
   type Window,
 } from './hypotheses.ts';
 
@@ -102,8 +106,79 @@ function fromNeutralOrBehind(rows: StateRow[], band: number): Measurement {
   return { n: set.length, effect: set.filter((r) => r.win).length / set.length - 0.5 };
 }
 
+/**
+ * Does a ward of his in the seconds before an epic monster go with his team taking it?
+ *
+ * Measured over OBJECTIVES, not games, which is why this hypothesis has an n worth having: 364
+ * epic monsters across 39 games rather than 20 lane states. One objective changing sides moves
+ * the warded rate by about a point, against ten points per game in the conversion finding.
+ *
+ * `onlyUncredited` is the confound control and the reason the spec carries it. Warding near an
+ * objective correlates with being near it, and being near it correlates with the team winning
+ * it, so the unrestricted version measures rotation as much as vision. Restricting to
+ * objectives he was NOT credited on removes the tautological part — being credited means his
+ * team took it — and leaves the question that is actually interesting.
+ */
+function wardBeforeObjective(db: Db, spec: VisionSpec, window: Window): Measurement {
+  const rows = queryParticipants(db, {
+    puuid: spec.puuid,
+    role: spec.role,
+    queueId: spec.queueId,
+    since: window.from,
+    ...(Number.isFinite(window.until) ? { until: window.until } : {}),
+  }).filter((r) => (Number.isFinite(window.until) ? r.gameCreation < window.until : true));
+
+  let wardedTaken = 0;
+  let wardedTotal = 0;
+  let bareTaken = 0;
+  let bareTotal = 0;
+
+  for (const row of rows) {
+    const match = getRawMatch(db, row.matchId);
+    const timeline = getRawTimeline(db, row.matchId);
+    if (!match || !timeline) continue;
+    const participants = participantsOf(match, timeline, spec.puuid);
+    if (participants === null) continue;
+    const myId = participants.idOf(spec.puuid);
+    if (myId === null) continue;
+
+    const wards = eventsOfType(timeline, 'WARD_PLACED').filter(
+      (e) => e.creatorId === myId && e.wardType !== 'TEEMO_MUSHROOM',
+    );
+
+    for (const monster of eventsOfType(timeline, 'ELITE_MONSTER_KILL')) {
+      const credited = [
+        ...(monster.killerId !== undefined && monster.killerId > 0 ? [monster.killerId] : []),
+        ...(monster.assistingParticipantIds ?? []),
+      ].includes(myId);
+      if (spec.onlyUncredited && credited) continue;
+
+      const ours =
+        monster.killerId !== undefined && participants.sideOf(monster.killerId) === 'ally';
+      const warded = wards.some(
+        (x) =>
+          x.timestamp <= monster.timestamp &&
+          monster.timestamp - x.timestamp <= spec.windowSeconds * 1000,
+      );
+      if (warded) {
+        wardedTotal += 1;
+        if (ours) wardedTaken += 1;
+      } else {
+        bareTotal += 1;
+        if (ours) bareTaken += 1;
+      }
+    }
+  }
+
+  const n = wardedTotal + bareTotal;
+  if (wardedTotal === 0 || bareTotal === 0) return { n, effect: Number.NaN };
+  return { n, effect: wardedTaken / wardedTotal - bareTaken / bareTotal };
+}
+
 export function standardMeasure(db: Db): Measure {
-  return (spec: AnalysisSpec, window: Window): Measurement => {
+  return (spec: Spec, window: Window): Measurement => {
+    // A vision spec carries a field a lane-state spec does not, which is what tells them apart.
+    if ('windowSeconds' in spec) return wardBeforeObjective(db, spec, window);
     if (spec.stratum === 'none' && spec.outcome === 'binary_win') {
       return conversionGapBinary(rowsFor(db, spec, window, spec.minute), spec.band);
     }
@@ -126,11 +201,17 @@ export function standardMeasure(db: Db): Measure {
  * Counted rather than assumed, so a hole can never be silent: three games arrived hours after
  * the Fase 0 finding existed and before it was registered, and they belong to neither side.
  */
-export function countGapGames(
-  db: Db,
-  spec: AnalysisSpec,
-  baselineUntil: number,
-  testFrom: number,
-): number {
+export function countGapGames(db: Db, spec: Spec, baselineUntil: number, testFrom: number): number {
+  // A vision spec has no lane state to read, so the unit is the GAME. Sending it through the
+  // lane-state path silently returned 0 — `spec.champion` is undefined there, which matches no
+  // row — and a declared hole that reports itself as empty is worse than no hole at all.
+  if ('windowSeconds' in spec) {
+    return queryParticipants(db, {
+      puuid: spec.puuid,
+      role: spec.role,
+      queueId: spec.queueId,
+      since: baselineUntil,
+    }).filter((r) => r.gameCreation >= baselineUntil && r.gameCreation < testFrom).length;
+  }
   return rowsFor(db, spec, { from: baselineUntil, until: testFrom }, spec.minute).length;
 }

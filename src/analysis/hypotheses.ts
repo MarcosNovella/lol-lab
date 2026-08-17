@@ -49,36 +49,47 @@ export type AnalysisSpec = {
 };
 
 /**
- * The canonical key order. Listed by hand so the hash is stable across engines, since
- * `JSON.stringify` follows insertion order and callers build specs in whatever order they like.
+ * A hypothesis about vision before an objective — a different SHAPE of question from a lane
+ * state, which is why it is a separate spec rather than more optional fields on the one above.
  */
-const SPEC_KEYS = [
-  'band',
-  'champion',
-  'minute',
-  'outcome',
-  'puuid',
-  'queueId',
-  'role',
-  'stratum',
-] as const;
+export type VisionSpec = {
+  puuid: string;
+  role: Role;
+  queueId: number;
+  /** Seconds before the objective a ward has to land to count. Arbitrary, so it gets swept. */
+  windowSeconds: number;
+  /**
+   * Restrict to objectives he was NOT credited on. Warding near an objective correlates with
+   * being near it, and being near it correlates with the team taking it, so the unrestricted
+   * version measures presence as much as vision.
+   */
+  onlyUncredited: boolean;
+};
 
-type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+export type Spec = AnalysisSpec | VisionSpec;
 
 /**
- * Type-level guarantee for G-013: adding a field to `AnalysisSpec` without listing it in
- * `SPEC_KEYS` fails `tsc`. Without this the hash would silently ignore the new knob, which is
- * precisely the failure the ledger exists to prevent.
+ * Canonical JSON over the spec's OWN keys, sorted.
+ *
+ * It used to walk a fixed global key list, which quietly made the spec SCHEMA immutable: adding
+ * a field for a new kind of hypothesis would have changed the hash of every hypothesis already
+ * registered and left them permanently unevaluatable. Hashing each spec's own keys means a new
+ * shape simply hashes differently, and the existing three are untouched — pinned by test, since
+ * "their hashes must never change" is the whole promise of G-013.
+ *
+ * The completeness guarantee survives and is now structural rather than a list someone has to
+ * remember: every key present is hashed, and TypeScript already requires every field of the
+ * spec type to be set at the call site.
  */
-export type SpecKeysCoverEveryField = Exact<(typeof SPEC_KEYS)[number], keyof AnalysisSpec>;
-
-export function canonicalSpec(spec: AnalysisSpec): string {
+export function canonicalSpec(spec: Spec): string {
   const ordered: Record<string, unknown> = {};
-  for (const key of SPEC_KEYS) ordered[key] = spec[key];
+  for (const key of Object.keys(spec).sort()) {
+    ordered[key] = (spec as Record<string, unknown>)[key];
+  }
   return JSON.stringify(ordered);
 }
 
-export function specHash(spec: AnalysisSpec): string {
+export function specHash(spec: Spec): string {
   return createHash('sha256').update(canonicalSpec(spec)).digest('hex').slice(0, 16);
 }
 
@@ -91,7 +102,7 @@ export type Hypothesis = {
   registeredAt: number;
   claim: string;
   direction: Direction;
-  spec: AnalysisSpec;
+  spec: Spec;
   specHash: string;
   baselineUntil: number;
   testFrom: number;
@@ -108,7 +119,7 @@ export type RegisterInput = {
   id: string;
   claim: string;
   direction: Direction;
-  spec: AnalysisSpec;
+  spec: Spec;
   baselineUntil: number;
   testFrom: number;
   /** Games that fall in the declared hole between the two boundaries. Counted, never assumed. */
@@ -196,7 +207,7 @@ function rowToHypothesis(r: Record<string, unknown>): Hypothesis {
     registeredAt: Number(r['registered_at']),
     claim: String(r['claim']),
     direction: String(r['direction']) as Direction,
-    spec: JSON.parse(String(r['spec'])) as AnalysisSpec,
+    spec: JSON.parse(String(r['spec'])) as Spec,
     specHash: String(r['spec_hash']),
     baselineUntil: Number(r['baseline_until']),
     testFrom: Number(r['test_from']),
@@ -236,7 +247,7 @@ export type Window = { from: number; until: number };
  * effect come out of the same function under the same spec. Computing the baseline by some
  * other route is how you end up comparing two numbers that were never comparable.
  */
-export type Measure = (spec: AnalysisSpec, window: Window) => Measurement;
+export type Measure = (spec: Spec, window: Window) => Measurement;
 
 export type Evaluation = {
   hypothesisId: string;
@@ -280,7 +291,7 @@ export function verdictFor(
 export function evaluateHypothesis(
   db: Db,
   id: string,
-  spec: AnalysisSpec,
+  spec: Spec,
   measure: Measure,
   options: { elo?: string | null; now?: number } = {},
 ): Evaluation {

@@ -175,8 +175,30 @@ is duration- or result-contaminated and says so: objectives taken (6.9 wins vs 4
 enemy-half occupancy (0.50 vs 0.25) and even control wards (2.2 vs 3.1, because losses run
 4.4 minutes longer) are all downstream of the result.
 
-Next: commit both repos — riot-mcp now has 14 new files and 141 tests uncommitted, and there is
-still no remote. Then the rest of M2.
+**athlete-os is PAUSED** until his WHOOP arrives (2026-08-16). M5 and Fase 4 are off the table
+until he says otherwise — build nothing that touches athlete-os. Roadmap updated.
+
+Ledger extended to hold more than one SHAPE of question. `canonicalSpec` used to walk a fixed
+global key list, which quietly made the spec schema immutable: adding a field for a new kind of
+hypothesis would have rewritten the hash of every hypothesis already registered and left them
+permanently unevaluatable. It now hashes each spec's own sorted keys — verified the three
+existing hashes are byte-identical after the change, and pinned the algorithm by test.
+
+Registered `ward_before_objective_60s`: among epic monsters he was NOT credited on, his team
+takes 57.8% of the ones he warded for in the previous 60s against 50.7% of the ones he did not
+(+7.1 points, n=64 vs 223). First hypothesis here with an n worth having — it accrues ~9
+objectives per game instead of half a lane state. Window swept per G-011: +0.124 at 30s, +0.082
+at 60s, ~0 at 90s and 120s, a decay coherent with the mechanism rather than the sign-flipping of
+the conversion finding. The presence confound is stated on the row and not solved.
+
+That registration exercised the retire path for real: the first attempt stored gap_games=0,
+because `countGapGames` sent a vision spec down the lane-state path where `spec.champion` is
+undefined and matches no row. Retired with the reason, fixed, re-registered as `_60s` with
+gap=3. `tsc` HAD flagged it — Node strips types without checking them, so the script ran anyway.
+Run verify BEFORE running a script, not after.
+
+Next: coverage tracker ("no puedo decirte nada de Diana vs Sylas, jugaste 2, necesito 6 más")
+and `lol review` weekly. Both pure LoL, both unblocked.
 
 Open questions:
 - **A3 still undecided and it blocks a third hypothesis.** `teamGoldDiff` contains his own lane

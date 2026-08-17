@@ -166,10 +166,15 @@ main's first ranked game)
   annotated with a real division — the same shape as athlete-os's 56-day clock. Cheap: one
   table, one call per sync.
 
-**M5 — daily export to athlete-os** (build early, read late)
-4-6 metric_keys through the existing `import_observations` RPC. athlete-os's pattern unlock
-is 56 CALENDAR days, so the clock only starts when the export starts. Every day of delay is a
-day added to the end.
+**M5 — daily export to athlete-os** — **ON HOLD 2026-08-16, Marcos's call.** athlete-os itself
+is paused until his WHOOP arrives, so the 56-day clock has nothing to count against: the export
+would be feeding a system with no life data on the other side. Do NOT build anything that
+touches athlete-os until he says the WHOOP is in. **Fase 4 (life vs performance) is blocked by
+the same thing** — it was only ever the athlete-os pattern engine reading LoL metric_keys.
+*(Original scope, for when it unblocks: 4-6 metric_keys through the existing
+`import_observations` RPC. The unlock is 56 CALENDAR days, so the clock starts when the export
+starts and every day of delay is a day added to the end — which is why this was pulled forward
+in the first place, and why it should restart promptly once the WHOOP lands.)*
 
 **Fase 3+** — hypothesis ledger (partially pulled forward, §1), metric lifecycle, coverage
 tracker, `lol review`, vault writes. Then Fase 4 (life data, needs ~56 days). Fase 5 (a local

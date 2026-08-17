@@ -1,9 +1,9 @@
 import {
-  type AnalysisSpec,
   getHypothesis,
   listHypotheses,
   type RegisterInput,
   registerHypothesis,
+  type Spec,
 } from '../src/analysis/hypotheses.ts';
 import { countGapGames, standardMeasure } from '../src/analysis/measures.ts';
 import { openDb } from '../src/store/db.ts';
@@ -42,7 +42,14 @@ const base = {
   band: 500,
 } as const;
 
-const SPECS: Record<string, AnalysisSpec> = {
+const SPECS: Record<string, Spec> = {
+  ward_before_objective_60s: {
+    puuid: smurf.puuid,
+    role: 'MIDDLE',
+    queueId: 420,
+    windowSeconds: 60,
+    onlyUncredited: true,
+  },
   lead_conversion_gap: { ...base, outcome: 'binary_win', stratum: 'none', champion: null },
   lead_conversion_gap_gold: {
     ...base,
@@ -62,6 +69,17 @@ const CLAIMS: Record<
   string,
   { claim: string; direction: 'lower' | 'higher'; nNeeded: number; caveat: string }
 > = {
+  ward_before_objective_60s: {
+    claim:
+      'Among epic monsters he was NOT credited on, his team takes a HIGHER share of the ones he warded for in the preceding 60 seconds than of the ones he did not.',
+    direction: 'higher',
+    // h is about 0.14 on the baseline, so roughly 770 per group. At ~9 epics a game with 23%
+    // warded that is hundreds of games -- but the n accrues about nine per game instead of half
+    // a lane state, so this is the first hypothesis here that can actually resolve.
+    nNeeded: 1200,
+    caveat:
+      'The window is arbitrary and was swept: the gap is +0.124 at 30s, +0.082 at 60s, -0.006 at 90s and +0.006 at 120s, so the effect lives only in the short windows. That decay is at least coherent with the mechanism -- a ward 30 seconds before an objective is for that fight, one two minutes before is routine -- unlike the minute-14 conversion gap, whose sign flipped between adjacent minutes for no reason. THE CONFOUND THAT REMAINS: warding near an objective correlates with being near it, and being near it correlates with the team taking it. Restricting to objectives he was not credited on removes the tautological part but not the rest -- he can be present without being credited -- so this is an association and the ward may be a marker of rotation rather than a cause. Registered anyway: the direction is stated in advance and out-of-sample games will speak.',
+  },
   lead_conversion_gap: {
     claim:
       'From a >500g lane lead at minute 14, his win rate is BELOW his lane opponents rate from the same state.',
@@ -126,11 +144,17 @@ for (const [id, spec] of Object.entries(SPECS)) {
     caveat: meta.caveat,
   };
   const saved = registerHypothesis(db, input, now);
+  // Describe whichever shape the spec is. Reading lane-state fields off a vision spec printed
+  // "minute undefined band undefined" and tsc had already said so -- Node strips types without
+  // checking them, so the script ran anyway.
+  const describeSpec = (s: Spec): string =>
+    'windowSeconds' in s
+      ? `ventana ${s.windowSeconds}s  ${s.role}/${s.queueId}  solo-sin-crédito=${s.onlyUncredited}`
+      : `minuto ${s.minute} banda ${s.band}  ${s.role}/${s.queueId}  outcome=${s.outcome} ` +
+        `stratum=${s.stratum} champion=${s.champion ?? 'any'}`;
   out(
     `+ ${saved.id}\n` +
-      `    spec      ${saved.specHash}  minute ${spec.minute} band ${spec.band} ` +
-      `${spec.role}/${spec.queueId} outcome=${spec.outcome} stratum=${spec.stratum} ` +
-      `champion=${spec.champion ?? 'any'}\n` +
+      `    spec      ${saved.specHash}  ${describeSpec(spec)}\n` +
       `    baseline  effect ${saved.baselineEffect.toFixed(4)} over n=${saved.baselineN}\n` +
       `    needs     n=${saved.nNeeded} before any verdict is allowed\n` +
       `    gap       ${saved.gapGames} game(s) excluded from both sides`,
