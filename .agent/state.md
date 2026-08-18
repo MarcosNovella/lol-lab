@@ -232,3 +232,23 @@ Open questions:
   now pushed, so cleaning it would mean a force-push.
 - Dev key expires ~14:00 today (pasted 2026-08-16 14:08). Personal key still not arrived.
 - Rename `riot-mcp` → `lol-lab`: deferred to end of week (path wired into `~/.claude.json`).
+
+- 2026-08-18 S5: continuado desde una sesión remota (máquina de trabajo, sin `.env`/`data/`/
+  `vault/` locales — todos gitignored a propósito). `.env` recreado con una dev key nueva.
+  Node del sandbox es 22 por defecto; el repo pide 24 (`nvm install 24`, `pnpm install`).
+  Bloqueo de red inicial (proxy del entorno remoto rechazaba `riotgames.com` con 403) resuelto
+  ajustando la política del environment a "Unrestricted" desde claude.ai/code. Segundo
+  bloqueo, más sutil: el `fetch` nativo de Node 24 no respeta `HTTPS_PROXY`/`HTTPS_PROXY` salvo
+  que se le pase `NODE_USE_ENV_PROXY=1`, y el `StdioClientTransport` de `scripts/call.ts` spawnea
+  el server con un entorno reducido (`DEFAULT_INHERITED_ENV_VARS` del SDK de MCP: HOME, PATH,
+  SHELL, TERM, USER — no reenvía proxy vars). Ninguno de los dos hechos es del repo; son del
+  sandbox. Resuelto con un script descartable fuera del repo que reenvía `process.env` completo
+  al hijo — no vale la pena parchear `scripts/call.ts` para esto, porque en la compu personal
+  (sin proxy) el problema no existe.
+  Resincronizado: smurf 75 partidas (57 soloq + 18 flex, 3 + 1 remakes excluidos), 71/75
+  timelines (el backfill de soloq tardó más que el timeout de 60s del cliente MCP y cortó del
+  lado del cliente, pero el server siguió escribiendo — se completó igual, en tandas más chicas
+  la vez siguiente). Main: 0 partidas ranked todavía (sigue sin clasificar). Nuevo rank snapshot:
+  smurf soloq **PLATINUM I 38 LP (28W-27L)**, subió desde Platinum II 82 LP registrado en S3;
+  flex sin cambios, Silver I 29 LP. `pnpm verify` verde, 182 tests (mismo número que S4 salvo
+  que aún no se corrió con el cache nuevo — nada de análisis re-ejecutado esta sesión).
