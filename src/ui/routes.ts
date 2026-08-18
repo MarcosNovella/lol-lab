@@ -4,12 +4,29 @@ import {
   TAGS,
   type Tag,
   tagGame,
+  tagOf,
   untaggedGames,
 } from '../analysis/capture.ts';
+import { coverageOf, coverageTotals } from '../analysis/coverage.ts';
+import { stateCurve } from '../analysis/curve.ts';
+import { evaluationsOf, listHypotheses } from '../analysis/hypotheses.ts';
+import { collectMatchups } from '../analysis/matchups.ts';
+import { deathsOf, describeDeath, expensiveMoments } from '../analysis/moments.ts';
+import { sameChampion } from '../analysis/names.ts';
+import { confidenceOf, prepMatchup } from '../analysis/prep.ts';
+import { loadPriors, priorFor, priorsKeyedLike } from '../analysis/priors.ts';
 import { describeRank, latestSnapshot, TRACKED_QUEUES } from '../analysis/rank.ts';
+import { type DeathDot, deathMapSvg, goldCurveSvg, isOwnHalf } from '../analysis/render.ts';
 import { keyState } from '../riot/key.ts';
 import type { Db } from '../store/db.ts';
-import { findAccount, lastSync, listAccounts } from '../store/matches.ts';
+import {
+  findAccount,
+  getRawMatch,
+  getRawTimeline,
+  lastSync,
+  listAccounts,
+  queryParticipants,
+} from '../store/matches.ts';
 
 /**
  * The UI's handlers, as functions over `Db` rather than over an HTTP request.
@@ -339,4 +356,243 @@ export async function sincronizar(
     // button for the rest of the process's life, with no way back but a restart.
     corriendo = false;
   }
+}
+
+// ------------------------------------------------------------------------ lectura
+
+export type MomentoPartida = {
+  matchId: string;
+  at: number;
+  campeon: string;
+  rival: string | null;
+  gano: boolean;
+  tag: string | null;
+  momentos: { minuto: string; linea: string; oro: number }[];
+  sinMedir: number;
+  sinTimeline: boolean;
+};
+
+/**
+ * The headline output, unchanged in substance from `lol report`: the three most expensive
+ * moments of each recent game, with the exact minute to scrub a replay to.
+ *
+ * This stays the top of the page on purpose. ADR-007 banned a dashboard of aggregates REPLACING
+ * this, and the ban still holds — the UI adds execution, it does not promote averages.
+ */
+export function momentos(db: Db, cuenta: string, limite = 5): MomentoPartida[] {
+  const { puuid } = cuentaDe(db, cuenta);
+  const rows = queryParticipants(db, { puuid, role: 'MIDDLE', queueId: 420, limit: limite });
+  const out: MomentoPartida[] = [];
+
+  for (const row of rows) {
+    const match = getRawMatch(db, row.matchId);
+    const timeline = getRawTimeline(db, row.matchId);
+    const me = match?.info.participants.find((p) => p.puuid === puuid);
+    const rival =
+      match === null || me === undefined
+        ? null
+        : (match.info.participants.find(
+            (p) => p.teamPosition === me.teamPosition && p.teamId !== me.teamId,
+          )?.championName ?? null);
+
+    if (match === null || timeline === null) {
+      out.push({
+        matchId: row.matchId,
+        at: row.gameCreation,
+        campeon: row.champion,
+        rival,
+        gano: row.win === 1,
+        tag: tagOf(db, row.matchId, puuid),
+        momentos: [],
+        sinMedir: 0,
+        sinTimeline: true,
+      });
+      continue;
+    }
+
+    const { moments, unmeasurable } = expensiveMoments(match, timeline, puuid, 3);
+    out.push({
+      matchId: row.matchId,
+      at: row.gameCreation,
+      campeon: row.champion,
+      rival,
+      gano: row.win === 1,
+      tag: tagOf(db, row.matchId, puuid),
+      momentos: moments.map((m) => ({ minuto: m.at, linea: m.line, oro: m.costGold })),
+      sinMedir: unmeasurable,
+      sinTimeline: false,
+    });
+  }
+  return out;
+}
+
+/** The two things text does badly (ADR-007), rendered by the SVG builders that already exist. */
+export function graficos(
+  db: Db,
+  cuenta: string,
+  limite = 10,
+): {
+  curva: string | null;
+  mapa: string;
+  muertes: number;
+  propiaMitad: number;
+  partidas: number;
+} {
+  const { puuid } = cuentaDe(db, cuenta);
+  const recientes = queryParticipants(db, { puuid, role: 'MIDDLE', queueId: 420, limit: limite });
+  const todas = queryParticipants(db, { puuid, role: 'MIDDLE', queueId: 420 });
+
+  let curva: string | null = null;
+  for (const row of recientes) {
+    const match = getRawMatch(db, row.matchId);
+    const timeline = getRawTimeline(db, row.matchId);
+    if (match === null || timeline === null) continue;
+    const c = stateCurve(match, timeline, puuid);
+    if (c.points.length > 0) {
+      curva = goldCurveSvg(c.points);
+      break;
+    }
+  }
+
+  const dots: DeathDot[] = [];
+  let conTimeline = 0;
+  for (const row of todas) {
+    const match = getRawMatch(db, row.matchId);
+    const timeline = getRawTimeline(db, row.matchId);
+    if (match === null || timeline === null) continue;
+    conTimeline += 1;
+    for (const death of deathsOf(match, timeline, puuid)) {
+      if (death.position === null) continue;
+      dots.push({
+        position: death.position,
+        // Per game, because which half is "his" depends on the side he was on THAT game —
+        // Summoner's Rift lanes are absolute and shared, so this is computed, never mirrored
+        // (ADR-014).
+        teamId: row.teamId,
+        minute: Math.floor(death.timestamp / 60_000),
+        costGold: death.costGold,
+        label: describeDeath(death),
+      });
+    }
+  }
+
+  return {
+    curva,
+    mapa: deathMapSvg(dots),
+    muertes: dots.length,
+    propiaMitad: dots.filter((d) => isOwnHalf(d.position, d.teamId)).length,
+    partidas: conTimeline,
+  };
+}
+
+export function cobertura(
+  db: Db,
+  cuenta: string,
+  limite = 12,
+): {
+  alcance: { cuenta: string; cola: string; desde: number | null; remakes: string };
+  totales: { matchups: number; reps: number; mudos: number };
+  filas: {
+    campeon: string;
+    rival: string;
+    propias: number;
+    reps: number;
+    confianza: string;
+    faltan: number;
+    siguiente: string | null;
+  }[];
+} {
+  const { label } = cuentaDe(db, cuenta);
+  const rows = collectMatchups(db);
+  const priors = priorsKeyedLike(
+    loadPriors(),
+    rows.map((r) => ({ champion: r.champion, opponent: r.opponent })),
+  );
+  const c = coverageOf(rows, { account: label, priors });
+  const totales = coverageTotals(rows, c);
+  return {
+    alcance: {
+      cuenta: c.scope.account,
+      cola: c.scope.queue,
+      desde: c.scope.since,
+      remakes: c.scope.remakes,
+    },
+    totales: { matchups: totales.matchups, reps: totales.reps, mudos: totales.silent },
+    filas: c.rows.slice(0, limite).map((r) => ({
+      campeon: r.champion,
+      rival: r.opponent,
+      propias: r.ownGames,
+      reps: r.reps,
+      confianza: r.confidence,
+      faltan: r.gamesToNext,
+      siguiente: r.nextConfidence,
+    })),
+  };
+}
+
+export function prep(
+  db: Db,
+  cuenta: string,
+  campeon: string,
+  rival: string,
+): {
+  campeon: string;
+  rival: string;
+  reps: number;
+  propias: { ganadas: number; jugadas: number };
+  otrasCuentas: { cuenta: string; ganadas: number; jugadas: number }[];
+  meta: { winRate: number; muestra: number } | null;
+  estimados: { peso: number; winRate: number; propio: number }[];
+  confianza: string;
+} {
+  const { label } = cuentaDe(db, cuenta);
+  const rows = collectMatchups(db);
+  // Resolve to the spellings the cache uses so 'twisted fate' and 'TwistedFate' both work; a
+  // raw comparison here once manufactured a whole false discrepancy report (G-016).
+  const mio = rows.find((r) => sameChampion(r.champion, campeon))?.champion ?? campeon;
+  const suyo = rows.find((r) => sameChampion(r.opponent, rival))?.opponent ?? rival;
+  const prior = priorFor(loadPriors(), mio, suyo);
+  const p = prepMatchup(rows, { champion: mio, opponent: suyo, account: label, prior });
+
+  return {
+    campeon: mio,
+    rival: suyo,
+    reps: p.repsTotal,
+    propias: { ganadas: p.own.wins, jugadas: p.own.games },
+    otrasCuentas: p.otherAccounts.map((o) => ({
+      cuenta: o.account,
+      ganadas: o.wins,
+      jugadas: o.games,
+    })),
+    meta: prior === null ? null : { winRate: prior.winRate, muestra: prior.sampleGames },
+    estimados: p.estimates.map((e) => ({
+      peso: e.weight,
+      winRate: e.winRate,
+      propio: e.ownWeight,
+    })),
+    confianza: confidenceOf(p),
+  };
+}
+
+export function ledger(db: Db): {
+  id: string;
+  claim: string;
+  baseline: number;
+  baselineN: number;
+  necesita: number;
+  cautela: string;
+  ultima: { veredicto: string; n: number } | null;
+}[] {
+  return listHypotheses(db).map((h) => {
+    const last = evaluationsOf(db, h.id)[0];
+    return {
+      id: h.id,
+      claim: h.claim,
+      baseline: h.baselineEffect,
+      baselineN: h.baselineN,
+      necesita: h.nNeeded,
+      cautela: h.caveat,
+      ultima: last === undefined ? null : { veredicto: last.verdict, n: last.n },
+    };
+  });
 }

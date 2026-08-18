@@ -71,9 +71,28 @@ button.on { background: #2f4d38; border-color: var(--ok); }
 .barra { height: 6px; background: #0b0d11; border-radius: 3px; overflow: hidden; margin-top: 10px; }
 .barra > div { height: 100%; background: var(--ok); width: 0; transition: width .2s; }
 .log { color: var(--dim); font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
+.momento { font-variant-numeric: tabular-nums; padding: 3px 0; }
+.momento .min { color: var(--warn); }
+.tag { font-size: 12px; color: var(--dim); border: 1px solid var(--line);
+       border-radius: 5px; padding: 1px 6px; margin-left: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: var(--dim); font-weight: 600; padding: 4px 8px 4px 0; }
+td { padding: 3px 8px 3px 0; border-top: 1px solid var(--line); }
+.alcance { color: var(--dim); font-size: 12px; margin-top: 8px; }
+input { font: inherit; color: var(--ink); background: #0b0d11; border: 1px solid var(--line);
+        border-radius: 7px; padding: 6px 10px; width: 150px; }
+.svgbox { overflow-x: auto; }
 `;
 
-const SCRIPT = `
+/**
+ * The client script, exported ONLY so a test can parse it.
+ *
+ * It lives inside a template literal, which means a syntax error in it is invisible to tsc, to
+ * Biome and to Vitest alike — the page would simply do nothing, with a clean build and a clean
+ * suite. `tests/ui.test.ts` compiles it with `new Function` for exactly that reason. Same class
+ * of blind spot G-018 was born from: the verify chain does not look inside strings.
+ */
+export const CLIENT_SCRIPT = `
 const TOKEN = new URLSearchParams(location.search).get('t');
 const api = (path) => fetch(path + (path.includes('?') ? '&' : '?') + 't=' + TOKEN)
   .then(async (r) => {
@@ -292,11 +311,14 @@ function renderSync() {
         relleno.style.width = '100%';
         log.textContent =
           e.bajadas + ' nueva(s), ' + e.timelines + ' timeline(s), ' + e.remakes + ' remake(s)' +
-          (e.errores.length ? '\n' + e.errores.slice(0, 3).join('\n') : '');
+          (e.errores.length ? '\\n' + e.errores.slice(0, 3).join('\\n') : '');
         src.close();
         boton.disabled = false;
         void renderPendientes();
         void refrescar();
+        void renderMomentos();
+        void renderGraficos();
+        void renderCobertura();
       }
       if (e.tipo === 'error') {
         log.textContent = 'no corrió: ' + e.mensaje;
@@ -316,6 +338,174 @@ function renderSync() {
   };
 }
 
+async function renderMomentos() {
+  const box = document.getElementById('momentos');
+  box.replaceChildren();
+  const partidas = await api('/api/momentos');
+  if (partidas.length === 0) {
+    box.append(el('div', 'card dim', 'No hay partidas de mid en soloq en la caché.'));
+    return;
+  }
+  for (const p of partidas) {
+    const card = el('div', 'card');
+    const head = el('div', 'que');
+    head.append(el('span', null, p.campeon + (p.rival ? ' vs ' + p.rival : '') + '  '));
+    head.append(el('span', p.gano ? 'victoria' : 'derrota', p.gano ? 'victoria' : 'DERROTA'));
+    if (p.tag) head.append(el('span', 'tag', p.tag));
+    card.append(head);
+    card.append(el('div', 'cuando',
+      new Date(p.at).toLocaleString('es-AR', { hourCycle: 'h23' })));
+
+    if (p.sinTimeline) {
+      card.append(el('div', 'porque', 'sin timeline en caché — nada que derivar'));
+    } else if (p.momentos.length === 0) {
+      card.append(el('div', 'porque', 'sin momentos medibles'));
+    } else {
+      for (const m of p.momentos) {
+        const row = el('div', 'momento');
+        row.append(el('span', 'min', 'min ' + m.minuto + '  '));
+        row.append(el('span', null, m.linea + '  [' + m.oro + ' de oro]'));
+        card.append(row);
+      }
+    }
+    if (p.sinMedir > 0) {
+      card.append(el('div', 'porque',
+        p.sinMedir + ' muerte(s) sin ventana de 2 min por delante, no rankeadas'));
+    }
+    box.append(card);
+  }
+  box.append(el('p', 'hint',
+    'Los replays .rofl se rompen al cambiar de parche: esto sirve dentro de la semana.'));
+}
+
+async function renderGraficos() {
+  const box = document.getElementById('graficos');
+  box.replaceChildren();
+  const g = await api('/api/graficos');
+  if (g.curva) {
+    const card = el('div', 'card');
+    card.append(el('div', 'que', 'Oro contra tu rival de línea'));
+    const holder = el('div', 'svgbox');
+    holder.innerHTML = g.curva;
+    card.append(holder);
+    box.append(card);
+  }
+  const card = el('div', 'card');
+  card.append(el('div', 'que', 'Dónde morís'));
+  card.append(el('div', 'porque',
+    g.muertes + ' muertes en ' + g.partidas + ' partidas · ' +
+    g.propiaMitad + ' en tu mitad, ' + (g.muertes - g.propiaMitad) + ' en la enemiga'));
+  const holder = el('div', 'svgbox');
+  holder.innerHTML = g.mapa;
+  card.append(holder);
+  box.append(card);
+}
+
+async function renderCobertura() {
+  const box = document.getElementById('cobertura');
+  box.replaceChildren();
+  const c = await api('/api/cobertura');
+  const card = el('div', 'card');
+  card.append(el('div', 'porque',
+    c.totales.matchups + ' matchups · ' + c.totales.reps + ' reps · ' +
+    c.totales.mudos + ' sobre los que no puedo decir nada'));
+
+  const table = document.createElement('table');
+  const head = document.createElement('tr');
+  for (const h of ['matchup', 'acá', 'reps', 'confianza', 'falta']) {
+    const th = document.createElement('th');
+    th.textContent = h;
+    head.append(th);
+  }
+  table.append(head);
+  for (const f of c.filas) {
+    const tr = document.createElement('tr');
+    const cells = [
+      f.campeon + ' vs ' + f.rival,
+      String(f.propias),
+      String(f.reps),
+      f.confianza,
+      f.faltan === 0 ? 'ya manda tu registro' : f.faltan + ' para ' + f.siguiente,
+    ];
+    for (const value of cells) {
+      const td = document.createElement('td');
+      td.textContent = value;
+      tr.append(td);
+    }
+    table.append(tr);
+  }
+  card.append(table);
+  // The scope travels with the numbers, always (G-015).
+  card.append(el('div', 'alcance',
+    'alcance: cuenta ' + c.alcance.cuenta + ' · cola ' + c.alcance.cola +
+    ' · remakes ' + c.alcance.remakes +
+    ' · las reps se suman entre cuentas, el récord no'));
+  box.append(card);
+}
+
+async function renderLedger() {
+  const box = document.getElementById('ledger');
+  box.replaceChildren();
+  const hs = await api('/api/ledger');
+  if (hs.length === 0) {
+    box.append(el('div', 'card dim', 'El ledger está vacío.'));
+    return;
+  }
+  for (const h of hs) {
+    const card = el('div', 'card');
+    card.append(el('div', 'que', h.id));
+    card.append(el('div', null, h.claim));
+    card.append(el('div', 'porque',
+      'baseline ' + h.baseline.toFixed(3) + ' sobre n=' + h.baselineN +
+      ' · necesita n=' + h.necesita +
+      (h.ultima ? ' · última: ' + h.ultima.veredicto + ' (n=' + h.ultima.n + ')' : ' · sin evaluar')));
+    card.append(el('div', 'alcance', 'cautela: ' + h.cautela));
+    box.append(card);
+  }
+}
+
+function renderPrep() {
+  const box = document.getElementById('prep');
+  box.replaceChildren();
+  const card = el('div', 'card');
+  const mio = el('input');
+  mio.placeholder = 'tu campeón';
+  const suyo = el('input');
+  suyo.placeholder = 'el rival';
+  const boton = el('button', null, 'Ver');
+  const salida = el('div', 'log');
+
+  const row = el('div', 'tags');
+  row.append(mio, suyo, boton);
+  card.append(row, salida);
+  box.append(card);
+
+  boton.onclick = async () => {
+    if (!mio.value || !suyo.value) return;
+    try {
+      const p = await api('/api/prep?campeon=' + encodeURIComponent(mio.value) +
+        '&rival=' + encodeURIComponent(suyo.value));
+      const pct = (x) => (Number.isFinite(x) ? (x * 100).toFixed(1) + '%' : '—');
+      const lineas = [
+        p.campeon + ' vs ' + p.rival,
+        'reps totales (todas las cuentas): ' + p.reps,
+        'en esta cuenta: ' + p.propias.ganadas + '/' + p.propias.jugadas,
+        ...p.otrasCuentas.map((o) =>
+          'en ' + o.cuenta + ': ' + o.ganadas + '/' + o.jugadas + ' — NO se suma, es rendimiento'),
+        p.meta === null
+          ? 'sin prior de op.gg'
+          : 'meta op.gg: ' + pct(p.meta.winRate) + ' sobre ' + p.meta.muestra + ' partidas',
+        ...p.estimados.map((e) =>
+          'estimado (peso ' + e.peso + '): ' + pct(e.winRate) + ' · propio ' + pct(e.propio)),
+        'confianza: ' + p.confianza,
+      ];
+      salida.textContent = lineas.join('\\n');
+    } catch (err) {
+      salida.textContent = 'Error: ' + err.message;
+    }
+  };
+}
+
 async function refrescar() {
   try {
     const e = await api('/api/estado');
@@ -328,11 +518,18 @@ async function refrescar() {
   }
 }
 
+const fallar = (err) => {
+  document.getElementById('error').textContent = 'Error: ' + err.message;
+};
+
 refrescar();
 renderSync();
-renderPendientes().catch((err) => {
-  document.getElementById('error').textContent = 'Error: ' + err.message;
-});
+renderPrep();
+renderPendientes().catch(fallar);
+renderMomentos().catch(fallar);
+renderGraficos().catch(fallar);
+renderCobertura().catch(fallar);
+renderLedger().catch(fallar);
 // Every 60s, and only the panel — it reads the database and spends no Riot request, so polling
 // it cannot eat the rate limit the sync needs.
 // The poll refreshes the PANEL and deliberately not the tagging list. Re-rendering that list
@@ -376,13 +573,28 @@ El token cambia en cada arranque, así que un favorito viejo no sirve.</p>
   <div id="pendientes"></div>
   <div id="tilt"></div>
 
+  <h2>Lo que salió caro</h2>
+  <div id="momentos"></div>
+
+  <h2>Antes de entrar</h2>
+  <div id="prep"></div>
+
+  <h2>Curva y mapa</h2>
+  <div id="graficos"></div>
+
+  <h2>De qué no puedo hablar todavía</h2>
+  <div id="cobertura"></div>
+
+  <h2>Hipótesis registradas</h2>
+  <div id="ledger"></div>
+
   <h2>Cuentas</h2>
   <div id="cuentas"></div>
 
   <h2>Key</h2>
   <div id="key"></div>
 </div>
-<script>${SCRIPT}</script>
+<script>${CLIENT_SCRIPT}</script>
 </body>
 </html>`;
 }

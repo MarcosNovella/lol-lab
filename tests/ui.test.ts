@@ -3,11 +3,17 @@ import { tagGame, tagOf } from '../src/analysis/capture.ts';
 import { flattenMatch } from '../src/analysis/flatten.ts';
 import { type Db, openDb } from '../src/store/db.ts';
 import { finishSyncLog, saveMatch, startSyncLog, upsertAccount } from '../src/store/matches.ts';
+import { CLIENT_SCRIPT } from '../src/ui/page.ts';
 import {
   abrirSesion,
   cerrarSesion,
+  cobertura,
   estado,
+  graficos,
+  ledger,
+  momentos,
   pendientes,
+  prep,
   RouteError,
   type SyncEvento,
   sincronizar,
@@ -319,5 +325,85 @@ describe('el sync', () => {
   it('refuses an unknown account before touching the lock', async () => {
     await expect(sincronizar(db, 'main', () => {}, { sync: okSync })).rejects.toThrow(RouteError);
     expect(syncEnCurso()).toBe(false);
+  });
+});
+
+describe('la página', () => {
+  it('ships a client script that actually parses', () => {
+    // The script lives inside a template literal, so a syntax error in it is invisible to tsc,
+    // to Biome and to Vitest — the page would load, do nothing, and every check would be green.
+    // This caught a real one: inside a template literal `\n` is a REAL newline, so a string
+    // written as '\n' came out split across two lines and the whole script was unparseable.
+    // Same blind spot G-018 was born from: the verify chain does not look inside strings.
+    expect(() => new Function(CLIENT_SCRIPT)).not.toThrow();
+  });
+
+  it('never inlines data into the shell', () => {
+    // The document is a shell on purpose: everything it shows comes from /api/*, so there is
+    // exactly one place where each number is produced and no chance of the page and the API
+    // disagreeing.
+    expect(CLIENT_SCRIPT).toContain('/api/estado');
+    expect(CLIENT_SCRIPT).toContain('/api/pendientes');
+  });
+});
+
+describe('las vistas de lectura', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'smurf-puuid',
+      gameName: 'LegendofTorcuato',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+  });
+
+  it('reports a game with no timeline as such instead of as one with no moments', () => {
+    seedGame(db, 'LA2_A', CREATION);
+    const [partida] = momentos(db, 'smurf');
+    // Two different facts: "nothing was derivable" and "nothing expensive happened". Collapsing
+    // them would quietly report a missing backfill as a clean game.
+    expect(partida?.sinTimeline).toBe(true);
+    expect(partida?.momentos).toEqual([]);
+  });
+
+  it('carries the tag onto the game it belongs to', () => {
+    seedGame(db, 'LA2_A', CREATION);
+    tagGame(db, { matchId: 'LA2_A', puuid: 'smurf-puuid', tag: 'mía' });
+    expect(momentos(db, 'smurf')[0]?.tag).toBe('mía');
+  });
+
+  it('states the scope on every coverage answer', () => {
+    seedGame(db, 'LA2_A', CREATION);
+    // G-015: a coverage count without its window, queue and remake policy invites exactly the
+    // false-discrepancy report that guardrail was born from.
+    expect(cobertura(db, 'smurf').alcance).toEqual({
+      cuenta: 'smurf',
+      cola: 'todas',
+      desde: null,
+      remakes: 'excluidos',
+    });
+  });
+
+  it('answers an empty ledger with an empty list, not an error', () => {
+    expect(ledger(db)).toEqual([]);
+  });
+
+  it('draws a map even with no deaths, and says the count is zero', () => {
+    seedGame(db, 'LA2_A', CREATION);
+    const g = graficos(db, 'smurf');
+    expect(g.muertes).toBe(0);
+    expect(g.mapa).toContain('<svg');
+  });
+
+  it('reports prep for a matchup with no games as resting on nothing', () => {
+    const p = prep(db, 'smurf', 'Diana', 'Sylas');
+    expect(p.propias).toEqual({ ganadas: 0, jugadas: 0 });
+    // No record and no prior: the honest answer is that there is nothing to say, and it must not
+    // come out as `mayormente_propio` the way it did before G-019.
+    expect(p.confianza).toBe('sin_datos');
   });
 });

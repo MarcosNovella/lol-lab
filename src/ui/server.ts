@@ -9,8 +9,13 @@ import { renderShell } from './page.ts';
 import {
   abrirSesion,
   cerrarSesion,
+  cobertura,
   estado,
+  graficos,
+  ledger,
+  momentos,
   pendientes,
+  prep,
   RouteError,
   type SyncEvento,
   sincronizar,
@@ -224,6 +229,31 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
       const sesion = numOrNull(body, 'sesion');
       if (sesion === null) throw new RouteError(400, "falta 'sesion'");
       json(response, 200, cerrarSesion(db, { sesion, tilt: numOrNull(body, 'tilt') }));
+      return;
+    }
+    if (url.pathname === '/api/momentos') {
+      json(response, 200, momentos(db, cuenta));
+      return;
+    }
+    if (url.pathname === '/api/graficos') {
+      json(response, 200, graficos(db, cuenta));
+      return;
+    }
+    if (url.pathname === '/api/cobertura') {
+      json(response, 200, cobertura(db, cuenta));
+      return;
+    }
+    if (url.pathname === '/api/ledger') {
+      json(response, 200, ledger(db));
+      return;
+    }
+    if (url.pathname === '/api/prep') {
+      const campeon = url.searchParams.get('campeon');
+      const rival = url.searchParams.get('rival');
+      if (campeon === null || rival === null) {
+        throw new RouteError(400, 'faltan campeon y rival');
+      }
+      json(response, 200, prep(db, cuenta, campeon, rival));
       return;
     }
     if (url.pathname === '/api/sync') {
