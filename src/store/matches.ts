@@ -407,6 +407,39 @@ export function startSyncLog(db: Db, puuid: string, queueId: number | null): num
   return Number(row['id']);
 }
 
+export type SyncLogRow = {
+  id: number;
+  puuid: string;
+  startedAt: number;
+  finishedAt: number | null;
+  fetched: number;
+  timelines: number;
+  error: string | null;
+};
+
+/**
+ * The most recent sync for an account, finished or not.
+ *
+ * `finishedAt` NULL means a run that never completed — a crash, or one still going. It is
+ * reported as such rather than treated as "never synced": the two are different facts and the
+ * status panel has to be able to say which one it is looking at.
+ */
+export function lastSync(db: Db, puuid: string): SyncLogRow | null {
+  const row = db
+    .prepare('SELECT * FROM sync_log WHERE puuid = ? ORDER BY started_at DESC LIMIT 1')
+    .get(puuid) as Record<string, unknown> | undefined;
+  if (row === undefined) return null;
+  return {
+    id: Number(row['id']),
+    puuid: String(row['puuid']),
+    startedAt: Number(row['started_at']),
+    finishedAt: row['finished_at'] === null ? null : Number(row['finished_at']),
+    fetched: Number(row['fetched']),
+    timelines: Number(row['timelines']),
+    error: row['error'] === null ? null : String(row['error']),
+  };
+}
+
 export function finishSyncLog(
   db: Db,
   id: number,

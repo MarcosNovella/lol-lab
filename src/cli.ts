@@ -7,6 +7,7 @@ import * as prep from './cli/prep.ts';
 import * as rank from './cli/rank.ts';
 import * as report from './cli/report.ts';
 import { CliError, closeInput, out } from './cli/shared.ts';
+import * as ui from './cli/ui.ts';
 
 /**
  * `lol` — one entry point for the rituals.
@@ -32,6 +33,7 @@ type Command = {
 };
 
 const COMMANDS: Record<string, Command> = {
+  ui: { summary: ui.SUMMARY, usage: ui.USAGE, run: ui.run },
   cerrar: { summary: cerrar.SUMMARY, usage: cerrar.USAGE, run: cerrar.run },
   report: { summary: report.SUMMARY, usage: report.USAGE, run: report.run },
   prep: { summary: prep.SUMMARY, usage: prep.USAGE, run: prep.run },
