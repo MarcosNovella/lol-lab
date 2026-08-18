@@ -7,6 +7,8 @@
  * there is exactly one place where each number is produced.
  */
 
+import { SVG_STYLE, SVG_VARS_DARK } from '../analysis/render.ts';
+
 function esc(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -15,7 +17,8 @@ function esc(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-const STYLE = `
+/** Exported so a test can assert it carries the rules the SVG builders need. */
+export const CLIENT_STYLE = `
 :root {
   color-scheme: dark;
   --bg: #0f1115;
@@ -82,6 +85,12 @@ td { padding: 3px 8px 3px 0; border-top: 1px solid var(--line); }
 input { font: inherit; color: var(--ink); background: #0b0d11; border: 1px solid var(--line);
         border-radius: 7px; padding: 6px 10px; width: 150px; }
 .svgbox { overflow-x: auto; }
+
+/* The SVG builders carry no presentation of their own - they emit classes. Pulled in from
+   render.ts rather than restated, so the static page and this one cannot drift apart, and an
+   SVG here cannot silently render as black-on-black the way it did before. */
+${SVG_VARS_DARK}
+${SVG_STYLE}
 `;
 
 /**
@@ -194,12 +203,45 @@ const TAGS = [
 
 let sesion = null;
 
+function tarjetaPartida(p, alTaguear) {
+  const card = el('div', 'card partida');
+  const quien = el('div', 'quien');
+  quien.append(el('span', null, p.campeon + '  '));
+  quien.append(el('span', p.gano ? 'victoria' : 'derrota', p.gano ? 'victoria' : 'DERROTA'));
+  quien.append(el('div', 'cuando',
+    new Date(p.terminoAt).toLocaleString('es-AR', { hourCycle: 'h23' })));
+  card.append(quien);
+
+  const tags = el('div', 'tags');
+  for (const [valor, etiqueta] of TAGS) {
+    const b = el('button', null, etiqueta);
+    b.onclick = async () => {
+      for (const otro of tags.children) otro.disabled = true;
+      try {
+        // One request per game, and the tag is on disk before this resolves.
+        if (sesion === null) sesion = (await post('/api/sesion/abrir')).sesion;
+        await post('/api/tag', { matchId: p.matchId, tag: valor, sesion });
+        b.classList.add('on');
+        setTimeout(alTaguear, 350);
+      } catch (err) {
+        document.getElementById('error').textContent = 'Error: ' + err.message;
+        for (const otro of tags.children) otro.disabled = false;
+      }
+    };
+    tags.append(b);
+  }
+  card.append(tags);
+  return card;
+}
+
 async function renderPendientes() {
   const box = document.getElementById('pendientes');
   box.replaceChildren();
-  const { partidas } = await api('/api/pendientes');
+  const { deLaSesion, atrasadas } = await api('/api/pendientes');
 
-  if (partidas.length === 0) {
+  const refrescarTodo = () => { void renderPendientes(); void refrescar(); };
+
+  if (deLaSesion.length === 0 && atrasadas.length === 0) {
     const card = el('div', 'card');
     card.append(el('div', 'ok', 'Nada sin taguear.'));
     box.append(card);
@@ -207,43 +249,31 @@ async function renderPendientes() {
     return;
   }
 
-  const hint = el('p', 'hint',
-    'Más viejas primero, en el orden en que las jugaste. Cada click se guarda en el momento: ' +
-    'si cerrás la pestaña a la mitad, lo que ya marcaste queda.');
-  box.append(hint);
+  if (deLaSesion.length > 0) {
+    box.append(el('p', 'hint',
+      'Más viejas primero, en el orden en que las jugaste. Cada click se guarda en el momento: ' +
+      'si cerrás la pestaña a la mitad, lo que ya marcaste queda.'));
+    for (const p of deLaSesion) box.append(tarjetaPartida(p, refrescarTodo));
+  } else {
+    box.append(el('p', 'hint', 'Nada de las últimas 12 horas.'));
+  }
 
-  for (const p of partidas) {
-    const card = el('div', 'card partida');
-    const quien = el('div', 'quien');
-    quien.append(el('span', null, p.campeon + '  '));
-    quien.append(el('span', p.gano ? 'victoria' : 'derrota', p.gano ? 'victoria' : 'DERROTA'));
-    quien.append(el('div', 'cuando',
-      new Date(p.terminoAt).toLocaleString('es-AR', { hourCycle: 'h23' })));
-    card.append(quien);
-
-    const tags = el('div', 'tags');
-    for (const [valor, etiqueta] of TAGS) {
-      const b = el('button', null, etiqueta);
-      b.onclick = async () => {
-        for (const otro of tags.children) otro.disabled = true;
-        try {
-          // One request per game, and the tag is on disk before this resolves.
-          if (sesion === null) sesion = (await post('/api/sesion/abrir')).sesion;
-          await post('/api/tag', { matchId: p.matchId, tag: valor, sesion });
-          b.classList.add('on');
-          setTimeout(() => {
-            void renderPendientes();
-            void refrescar();
-          }, 350);
-        } catch (err) {
-          document.getElementById('error').textContent = 'Error: ' + err.message;
-          for (const otro of tags.children) otro.disabled = false;
-        }
-      };
-      tags.append(b);
-    }
-    card.append(tags);
-    box.append(card);
+  // The backlog is FOLDED, not dropped. Tagging a two-week-old game is recall rather than
+  // observation and the lag column will say so; hiding the pile entirely would be deciding for
+  // him, showing it open would bury tonight's games under it.
+  if (atrasadas.length > 0) {
+    const abrir = el('button', null,
+      'Ver ' + atrasadas.length + ' partida(s) más viejas');
+    const viejas = el('div');
+    const nota = el('p', 'hint',
+      'Tienen más de 12 horas. Taguearlas es acordarse, no observar — queda anotado cuánto ' +
+      'tardaste, así que no se mezclan con las de recién.');
+    abrir.onclick = () => {
+      abrir.remove();
+      viejas.append(nota);
+      for (const p of atrasadas) viejas.append(tarjetaPartida(p, refrescarTodo));
+    };
+    box.append(abrir, viejas);
   }
 
   renderTilt();
@@ -541,7 +571,7 @@ setInterval(() => { if (!document.hidden) refrescar(); }, 60000);
 export function renderShell(token: string | null): string {
   if (token === null) {
     return `<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><title>lol</title><style>${STYLE}</style></head>
+<html lang="es"><head><meta charset="utf-8"><title>lol</title><style>${CLIENT_STYLE}</style></head>
 <body><div class="wrap">
 <h1>Falta el token</h1>
 <p class="sub">Abrí la URL que imprimió <code>pnpm lol ui</code> — lleva un <code>?t=</code> al final.
@@ -555,7 +585,7 @@ El token cambia en cada arranque, así que un favorito viejo no sirve.</p>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>lol</title>
-<style>${STYLE}</style>
+<style>${CLIENT_STYLE}</style>
 </head>
 <body>
 <div class="wrap">

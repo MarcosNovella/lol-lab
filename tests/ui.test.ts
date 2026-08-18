@@ -189,10 +189,24 @@ describe('la captura por click', () => {
     seedGame(db, 'LA2_NUEVA', CREATION + HOUR);
     // He replays the session in the order he lived it. `untaggedGames` hands back newest first
     // because every other consumer wants that, so the flip belongs here and is worth pinning.
-    expect(pendientes(db, 'smurf').partidas.map((p) => p.matchId)).toEqual([
+    const ahora = CREATION + 2 * HOUR;
+    expect(pendientes(db, 'smurf', ahora).deLaSesion.map((p) => p.matchId)).toEqual([
       'LA2_VIEJA',
       'LA2_NUEVA',
     ]);
+  });
+
+  it('separates tonight from the backlog', () => {
+    seedGame(db, 'LA2_ANTIGUA', CREATION);
+    seedGame(db, 'LA2_HOY', CREATION + 20 * HOUR);
+    const ahora = CREATION + 21 * HOUR;
+
+    const p = pendientes(db, 'smurf', ahora);
+    expect(p.deLaSesion.map((g) => g.matchId)).toEqual(['LA2_HOY']);
+    expect(p.atrasadas.map((g) => g.matchId)).toEqual(['LA2_ANTIGUA']);
+    // Not dropped, just moved: a backlog he cannot see is a backlog he cannot decide about.
+    // Tagging one is recall rather than observation, and the lag column records that either way.
+    expect(p.atrasadas).toHaveLength(1);
   });
 
   it('writes the tag BEFORE returning, which is the whole guarantee', () => {
@@ -203,7 +217,8 @@ describe('la captura por click', () => {
     // Verified for real by SIGKILLing the server mid-ritual: the tags already clicked were on
     // disk and the session row stayed honestly open. This is that property, in a unit.
     expect(tagOf(db, 'LA2_A', 'smurf-puuid')).toBe('mía');
-    expect(pendientes(db, 'smurf').partidas).toHaveLength(0);
+    const restante = pendientes(db, 'smurf');
+    expect([...restante.deLaSesion, ...restante.atrasadas]).toHaveLength(0);
   });
 
   it('reports the recall lag, measured from the END of the game', () => {

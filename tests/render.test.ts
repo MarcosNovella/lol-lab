@@ -8,7 +8,9 @@ import {
   MAP_MAX,
   mapPoint,
   renderPage,
+  SVG_STYLE,
 } from '../src/analysis/render.ts';
+import { CLIENT_STYLE } from '../src/ui/page.ts';
 
 describe('projecting a game position into SVG space', () => {
   it('FLIPS Y, so the enemy base is at the top of the picture', () => {
@@ -141,5 +143,40 @@ describe('the page', () => {
     });
     expect(html).not.toContain('<script>x</script>');
     expect(html).toContain('&lt;script&gt;');
+  });
+});
+
+describe('the SVGs carry no presentation of their own', () => {
+  /** Every class the builders emit, from a drawing that exercises both of them. */
+  function clasesEmitidas(): string[] {
+    const dots: DeathDot[] = [
+      { position: { x: 3000, y: 3000 }, teamId: 100, minute: 12, costGold: -400, label: 'a' },
+      { position: { x: 12000, y: 12000 }, teamId: 100, minute: 20, costGold: null, label: 'b' },
+    ];
+    const points: CurvePoint[] = [
+      { minute: 5, goldDiff: 300, xpDiff: 0, csDiff: 0, teamGoldDiff: 0 },
+      { minute: 10, goldDiff: -300, xpDiff: 0, csDiff: 0, teamGoldDiff: 0 },
+    ];
+    const svg = deathMapSvg(dots) + goldCurveSvg(points);
+    return [...new Set([...svg.matchAll(/class="([^"]+)"/g)].map((m) => m[1] ?? ''))];
+  }
+
+  it('every emitted class has a rule in the shared stylesheet', () => {
+    // The builders emit `class="own"` and carry no fill, so an SVG dropped into a document
+    // without these rules renders with browser defaults: black on whatever background. That is
+    // not hypothetical — the UI reused deathMapSvg without this stylesheet and produced a solid
+    // black square that counted 188 deaths and displayed none of them.
+    for (const clase of clasesEmitidas()) {
+      expect(SVG_STYLE, `falta una regla para .${clase}`).toContain(`.${clase}`);
+    }
+  });
+
+  it('the UI page includes that stylesheet, not a copy of it', () => {
+    // Both surfaces must pull from the same source, or they drift and only one of them is
+    // noticed to be wrong.
+    expect(CLIENT_STYLE).toContain(SVG_STYLE.trim().split('\n')[0] ?? '');
+    for (const clase of clasesEmitidas()) {
+      expect(CLIENT_STYLE, `la UI no estila .${clase}`).toContain(`.${clase}`);
+    }
   });
 });

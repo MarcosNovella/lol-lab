@@ -132,17 +132,58 @@ ${ticks}
 </svg>`;
 }
 
-const STYLE = `
+/**
+ * The CSS the SVG builders REQUIRE, and the variables it reads.
+ *
+ * Exported and shared, not copied. The builders emit `class="plot"`, `class="own"` and so on and
+ * carry no presentation of their own, so an SVG pasted into a document that lacks these rules
+ * renders with browser defaults: every fill black, on whatever background. That is not a
+ * hypothetical — the UI reused `deathMapSvg` without this and produced a solid black square that
+ * counted 188 deaths and showed none of them. `tests/render.test.ts` now asserts that every class
+ * the builders emit has a rule here.
+ */
+export const SVG_STYLE = `
+svg { display: block; max-width: 100%; }
+rect.plot { fill: var(--plot); }
+line.mid { stroke: var(--grid); stroke-width: 1.5; }
+line.half { stroke: var(--grid); stroke-width: 1; stroke-dasharray: 4 4; }
+line.zero { stroke: var(--grid); stroke-width: 1.5; }
+polyline.curve { fill: none; stroke: var(--fg); stroke-width: 2; }
+circle.up { fill: var(--up); } circle.down { fill: var(--down); }
+circle.own { fill: var(--own); fill-opacity: .65; }
+circle.enemy { fill: var(--enemy); fill-opacity: .65; }
+text.tag { fill: var(--muted); font-size: 10px; }
+`;
+
+/**
+ * The dark palette `SVG_STYLE` reads, on its own.
+ *
+ * Exported separately because a host that has already committed to a dark page must not have its
+ * charts follow the OS theme: the UI is dark by declaration, and without this the map came out
+ * light-panelled inside a dark document on any machine whose system theme is light.
+ */
+export const SVG_VARS_DARK = `
 :root {
-  --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --plot: #f3f4f6;
+  --fg: #e5e7eb; --muted: #9ca3af; --plot: #1a1d24;
+  --grid: #374151; --up: #4ade80; --down: #f87171; --own: #60a5fa; --enemy: #f87171;
+}
+`;
+
+/** The variables `SVG_STYLE` reads, following the OS theme. For a page that has not picked one. */
+export const SVG_VARS = `
+:root {
+  --fg: #1a1a1a; --muted: #6b7280; --plot: #f3f4f6;
   --grid: #d1d5db; --up: #15803d; --down: #b91c1c; --own: #2563eb; --enemy: #dc2626;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1115; --fg: #e5e7eb; --muted: #9ca3af; --plot: #1a1d24;
-    --grid: #374151; --up: #4ade80; --down: #f87171; --own: #60a5fa; --enemy: #f87171;
-  }
+${SVG_VARS_DARK.replace(':root {', '  :root {').trimEnd()}
 }
+`;
+
+const STYLE = `
+:root { --bg: #ffffff; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0f1115; } }
+${SVG_VARS}
 * { box-sizing: border-box; }
 body {
   margin: 0; padding: 24px; background: var(--bg); color: var(--fg);
@@ -155,16 +196,7 @@ p.note { color: var(--muted); margin: 0 0 24px; max-width: 70ch; }
 .card { border: 1px solid var(--grid); border-radius: 8px; padding: 12px; min-width: 0; }
 .card h3 { font-size: 13px; margin: 0 0 8px; font-weight: 600; }
 .card .meta { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
-svg { display: block; max-width: 100%; }
-rect.plot { fill: var(--plot); }
-line.mid { stroke: var(--grid); stroke-width: 1.5; }
-line.half { stroke: var(--grid); stroke-width: 1; stroke-dasharray: 4 4; }
-line.zero { stroke: var(--grid); stroke-width: 1.5; }
-polyline.curve { fill: none; stroke: var(--fg); stroke-width: 2; }
-circle.up { fill: var(--up); } circle.down { fill: var(--down); }
-circle.own { fill: var(--own); fill-opacity: .65; }
-circle.enemy { fill: var(--enemy); fill-opacity: .65; }
-text.tag { fill: var(--muted); font-size: 10px; }
+${SVG_STYLE}
 `;
 
 export type PageSection = { title: string; meta: string; svg: string };

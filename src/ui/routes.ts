@@ -204,15 +204,35 @@ export type Pendiente = {
 };
 
 /**
- * The games still waiting for a tag, OLDEST FIRST.
+ * How far back a game still counts as "the session he just played".
+ *
+ * Presentational, and it has to stay that way: it decides what the page shows first and enters no
+ * number anywhere. The lag that actually matters is recorded per tag from the game's end
+ * (ADR-015), so nothing downstream depends on where this line sits.
+ */
+export const VENTANA_SESION_MS = 12 * 3_600_000;
+
+/**
+ * The games still waiting for a tag, OLDEST FIRST, split into tonight's and the backlog.
  *
  * The order is not cosmetic and it is the same one `lol cerrar` uses: he replays the session in
  * the order he lived it, which is the order he remembers it in. `untaggedGames` returns newest
  * first because every other consumer wants that.
+ *
+ * THE SPLIT EXISTS FOR TWO REASONS, and the second is the real one. A first run has every game he
+ * has ever played sitting untagged — seventy of them in a seeded corpus — which renders as a wall
+ * that pushes the rest of the page out of sight. But more than that: tagging a two-week-old game
+ * is recall, not observation, and ADR-015 built the lag column precisely because those are not
+ * the same measurement. Showing them together invites him to fill in a backlog from memory and
+ * file it beside tonight's games as if it were the same thing.
  */
-export function pendientes(db: Db, cuenta: string): { cuenta: string; partidas: Pendiente[] } {
+export function pendientes(
+  db: Db,
+  cuenta: string,
+  now: number = Date.now(),
+): { cuenta: string; deLaSesion: Pendiente[]; atrasadas: Pendiente[] } {
   const { puuid, label } = cuentaDe(db, cuenta);
-  const partidas = untaggedGames(db, puuid, { limit: 50 })
+  const todas = untaggedGames(db, puuid, { limit: 200 })
     .map((g) => ({
       matchId: g.matchId,
       terminoAt: g.endedAt,
@@ -220,7 +240,12 @@ export function pendientes(db: Db, cuenta: string): { cuenta: string; partidas: 
       campeon: g.champion,
     }))
     .reverse();
-  return { cuenta: label, partidas };
+
+  return {
+    cuenta: label,
+    deLaSesion: todas.filter((p) => now - p.terminoAt <= VENTANA_SESION_MS),
+    atrasadas: todas.filter((p) => now - p.terminoAt > VENTANA_SESION_MS),
+  };
 }
 
 /**
