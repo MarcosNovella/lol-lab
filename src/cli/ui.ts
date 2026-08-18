@@ -16,17 +16,43 @@ import { CliError, out } from './shared.ts';
  * window to close, is a thing you forget is running; Ctrl-C here means it is off.
  */
 
+/**
+ * Escapes a URL for `cmd`'s parser.
+ *
+ * `start` is a cmd BUILTIN, so the shell reads the line before `start` ever sees it and `&`
+ * separates commands. Caret is cmd's escape character. Exported because it is the one piece of
+ * this that can be tested from Linux, and it is the piece that broke.
+ */
+export function escapeForCmd(url: string): string {
+  return url.replace(/[&|^<>]/g, (char) => `^${char}`);
+}
+
 function openBrowser(url: string): void {
   // Best effort by platform, and a failure is genuinely not an error: the URL is already on
   // screen and opening a browser is a convenience, not the job.
-  const command =
-    process.platform === 'win32' ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
-  // The URL is QUOTED for cmd: `start` treats `&` as a command separator, so an unquoted URL
-  // with a query string is a command injection into your own shell at worst and a browser that
-  // opens half a URL at best. Ours carries `?t=` and, since the port can now shift, a `&` is one
-  // edit away.
-  const args = process.platform === 'win32' ? ['/c', 'start', '', `"${url}"`] : [url];
-  const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+  if (process.platform === 'win32') {
+    // WHY THIS SHAPE, and it is worth reading because the obvious version is what broke.
+    //
+    // Passing `"${url}"` as an argv entry does NOT quote it: Node escapes the quotes itself when
+    // it builds the Windows command line, so cmd received \"http://...\" and `start` went looking
+    // for a FILE by that literal name. The fix for a hypothetical `&` broke the actual launch.
+    //
+    // `windowsVerbatimArguments` turns Node's escaping off, so the line below is passed to cmd
+    // exactly as written; the URL is escaped for cmd's own parser instead, which is the parser
+    // that actually matters. The empty `""` is `start`'s title argument — without it, `start`
+    // treats the first quoted token as the window title and opens nothing.
+    const child = spawn('cmd.exe', ['/c', 'start', '""', escapeForCmd(url)], {
+      detached: true,
+      stdio: 'ignore',
+      windowsVerbatimArguments: true,
+    });
+    child.on('error', () => {});
+    child.unref();
+    return;
+  }
+
+  const command = process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const child = spawn(command, [url], { detached: true, stdio: 'ignore' });
   // `spawn` reports a missing binary ASYNCHRONOUSLY, through an 'error' event — a try/catch
   // around the call looks like it handles that and handles nothing. Without this listener the
   // event is unhandled and takes the whole process down, so a machine with no `xdg-open` could
@@ -76,6 +102,9 @@ export async function run(argv: string[]): Promise<void> {
   out(`lol ui en ${ui.url}`);
   if (ui.port !== port) out(`  (el ${port} estaba ocupado, usé el ${ui.port})`);
   out();
+  // Said out loud because opening the browser is the one step that depends on the machine, and
+  // when it failed the panel looked broken when it was already running and reachable.
+  out('  Si el navegador no se abre solo, copiá esa URL y pegala vos: el panel ya está andando.');
   out('  El token cambia en cada arranque, así que guardar el favorito no sirve de nada.');
   out('  Ctrl-C para apagarlo.');
   openBrowser(ui.url);

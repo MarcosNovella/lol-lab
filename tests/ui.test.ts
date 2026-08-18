@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { tagGame, tagOf } from '../src/analysis/capture.ts';
 import { flattenMatch } from '../src/analysis/flatten.ts';
+import { escapeForCmd } from '../src/cli/ui.ts';
 import { type Db, openDb } from '../src/store/db.ts';
 import {
   finishSyncLog,
@@ -517,5 +518,27 @@ describe('el arranque', () => {
     await expect(startUiOnFreePort({ port: 45820, db, tries: 0 })).rejects.toThrow();
     await new Promise<void>((r) => ocupado.server.close(() => r()));
     db.close();
+  });
+});
+
+describe('abrir el navegador en Windows', () => {
+  it('escapes what cmd would otherwise read as syntax', () => {
+    // `start` is a cmd BUILTIN, so the shell parses the line before start sees it. These are the
+    // characters that would end the command early.
+    expect(escapeForCmd('http://127.0.0.1:4477/?t=abc&x=1')).toBe(
+      'http://127.0.0.1:4477/?t=abc^&x=1',
+    );
+    expect(escapeForCmd('a|b')).toBe('a^|b');
+    expect(escapeForCmd('a>b<c')).toBe('a^>b^<c');
+  });
+
+  it('leaves an ordinary token URL untouched', () => {
+    // The tokens are base64url — letters, digits, `_` and `-` — so the normal case must come out
+    // byte-identical. It did not: wrapping the URL in quotes made Node escape them into
+    // \"http://...\", and `start` went looking for a file with that literal name. Adding
+    // quotes to defend against a hypothetical `&` broke every real launch.
+    const url = 'http://127.0.0.1:4477/?t=KxI6hqfMEpGFO0XzcI6lIGKJ8H2CwY9E';
+    expect(escapeForCmd(url)).toBe(url);
+    expect(escapeForCmd(url)).not.toContain('"');
   });
 });
