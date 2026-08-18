@@ -1,10 +1,9 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { collectMatchups } from '../src/analysis/matchups.ts';
 import { sameChampion } from '../src/analysis/names.ts';
-import { confidenceOf, type MetaPrior, prepMatchup } from '../src/analysis/prep.ts';
+import { confidenceOf, prepMatchup } from '../src/analysis/prep.ts';
 import { openDb } from '../src/store/db.ts';
 import { findAccount } from '../src/store/matches.ts';
+import { loadPriors } from './priors.ts';
 
 /**
  * `lol prep <my champion> <enemy champion> [account]` — what to know before the game.
@@ -12,37 +11,8 @@ import { findAccount } from '../src/store/matches.ts';
  * Usage: node scripts/prep.ts Locke Akali smurf
  */
 
-const VAULT = process.env['VAULT_PATH'] ?? 'C:/Users/Marcos/Documents/vault';
-const META = join(VAULT, '_raw', 'lol', 'opgg-matchups-2026-08-14.csv');
-
 function out(line: string): void {
   process.stdout.write(`${line}\n`);
-}
-
-function loadPriors(): MetaPrior[] {
-  let text: string;
-  try {
-    text = readFileSync(META, 'utf8');
-  } catch {
-    return [];
-  }
-  const lines = text.trim().split('\n');
-  const head = lines[0]?.split(',') ?? [];
-  const at = (name: string): number => head.indexOf(name);
-  const priors: MetaPrior[] = [];
-  for (const line of lines.slice(1)) {
-    const c = line.split(',');
-    const pct = Number(c[at('wr_pct')]);
-    const games = Number(c[at('muestra_partidas')]);
-    if (!Number.isFinite(pct) || !Number.isFinite(games) || games <= 0) continue;
-    priors.push({
-      champion: String(c[at('champion')]),
-      opponent: String(c[at('lane_opponent')]),
-      sampleGames: games,
-      winRate: pct / 100,
-    });
-  }
-  return priors;
 }
 
 const [, , championArg, opponentArg, accountArg = 'smurf'] = process.argv;

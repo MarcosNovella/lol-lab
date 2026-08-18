@@ -200,6 +200,35 @@ Run verify BEFORE running a script, not after.
 Next: coverage tracker ("no puedo decirte nada de Diana vs Sylas, jugaste 2, necesito 6 más")
 and `lol review` weekly. Both pure LoL, both unblocked.
 
+- 2026-08-18 S5 continued: coverage tracker BUILT. `src/analysis/coverage.ts` —
+  `coverageGaps(rows, account, priorOf, atLeast?)`, the aggregate view of what `prep.ts`
+  already said one matchup at a time: every combo played on the given account whose
+  `confidenceOf` is strictly worse than `atLeast` (default `mayormente_propio`), sorted
+  least-covered first. Deliberately scoped to matchups actually PLAYED on that account
+  (`own.games > 0`) — a matchup never faced is a different question (what to expect), not a
+  coverage gap (how much of his own experience backs the number shown). Reuses `prepMatchup`/
+  `confidenceOf` as-is, no new judgement call, no new arbitrary threshold.
+  Caught while writing the first version of the "sorts least-covered first" test: without a
+  prior, `confidenceOf` treats any n>0 as `mayormente_propio` (nothing to shrink toward, so his
+  own record IS the whole story) — correct behaviour, not a bug, but it means the tracker only
+  has something to say where `priorOf` returns a row. Documented on the function, not silently
+  worked around.
+  Also caught by `tests/encoding.test.ts` (which exists because of G-018): a raw NUL byte landed
+  in the composite-key template literal on write, exactly the defect class `matchups.ts` already
+  carries a comment about. Fixed by rebuilding the string with `.join(' ')` instead of a raw
+  literal between two interpolations, and verified byte-for-byte after.
+  `scripts/coverage.ts` — `node scripts/coverage.ts [account]`, prints the gap list with the
+  same "faltan N para que pese la mitad" phrasing `prep.ts` uses per-matchup. Extracted the
+  op.gg CSV loader shared by both CLIs into `scripts/priors.ts` (`loadPriors()`) rather than
+  duplicate ~25 lines of parsing; `scripts/prep.ts` now imports it, behaviour unchanged (spot
+  ran `Locke Akali smurf` before and after, identical output).
+  Not yet runnable end-to-end against real priors in THIS session: `scripts/priors.ts` reads
+  `vault/_raw/lol/opgg-matchups-2026-08-14.csv`, and the vault stays local, so on this machine
+  `loadPriors()` returns `[]` and the report is (correctly) empty. Verified against the real
+  smurf cache anyway — 0 gaps reported for the reason above, not a false negative. Unit tests
+  cover the actual branching with synthetic priors. `pnpm verify` green, 188 tests (182 → 188).
+  `lol review` weekly not started this session.
+
 Open questions:
 - **A3 still undecided and it blocks a third hypothesis.** `teamGoldDiff` contains his own lane
   pair (r=0.65 with laneGoldDiff; net of the pair his teammates are +605 vs +47), so
