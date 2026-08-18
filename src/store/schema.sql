@@ -171,3 +171,48 @@ CREATE TABLE IF NOT EXISTS sync_log (
   timelines    INTEGER NOT NULL DEFAULT 0,
   error        TEXT
 );
+
+-- ================================================================================================
+-- REPORTED data. Everything above this line is what Riot returned, or something derived from it.
+-- Everything below is what Marcos typed, and the difference is load-bearing: a tag has no
+-- opponent counterpart, so nothing under this line can ever enter a peer comparison (ADR-002's
+-- whole trick is that every match ships nine other players; none of them tagged anything).
+-- ================================================================================================
+
+-- One row per sitting, because tilt is a property of the SITTING and the tag is a property of the
+-- game. Folding them into one row would force the tilt to be repeated per game or invented.
+CREATE TABLE IF NOT EXISTS play_sessions (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  puuid     TEXT NOT NULL,
+  opened_at INTEGER NOT NULL,     -- epoch ms
+  closed_at INTEGER,              -- NULL while the sitting is still open
+  -- 1-5, and NULL means NOT REPORTED, never "neutral". A session closed without a tilt is a
+  -- session with no tilt measurement, and imputing 3 would be exactly the substitution G-005
+  -- exists to prevent.
+  tilt      INTEGER CHECK (tilt IS NULL OR (tilt BETWEEN 1 AND 5)),
+  FOREIGN KEY (puuid) REFERENCES accounts (puuid) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS play_sessions_puuid ON play_sessions (puuid, opened_at DESC);
+
+-- The attribution tag: whose result was this?
+--   'mía'    — I produced it
+--   'igual'  — it was going to end this way without me
+--   'pareja' — it could have gone either way
+-- It reads the same for a win and for a defeat on purpose, so it is one tap per GAME rather than
+-- a defeat-only questionnaire that quietly stops being filled in during a good week.
+CREATE TABLE IF NOT EXISTS game_tags (
+  match_id   TEXT NOT NULL,
+  puuid      TEXT NOT NULL,
+  session_id INTEGER,
+  tag        TEXT NOT NULL CHECK (tag IN ('mía', 'igual', 'pareja')),
+  -- WHEN it was typed, always. A tag put in three days later is memory, not observation, and a
+  -- reader that cannot tell the two apart is trusting recall it never measured.
+  tagged_at  INTEGER NOT NULL,
+  PRIMARY KEY (match_id, puuid),
+  FOREIGN KEY (match_id)   REFERENCES matches (match_id)    ON DELETE CASCADE,
+  FOREIGN KEY (puuid)      REFERENCES accounts (puuid)      ON DELETE CASCADE,
+  FOREIGN KEY (session_id) REFERENCES play_sessions (id)    ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS game_tags_puuid ON game_tags (puuid, tagged_at DESC);
