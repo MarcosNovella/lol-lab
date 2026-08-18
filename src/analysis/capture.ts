@@ -191,6 +191,11 @@ export function untaggedGames(
          JOIN matches m ON m.match_id = p.match_id
         WHERE p.puuid = ?
           AND m.game_creation >= ?
+          -- Same remake rule queryParticipants applies: duration >= 300s, a real position.
+          -- A 68-second remake has no result to attribute, and asking him to tag one teaches
+          -- the ritual that some of its questions are noise.
+          AND m.game_duration >= 300
+          AND p.team_position <> ''
           AND NOT EXISTS (
                 SELECT 1 FROM game_tags t
                  WHERE t.match_id = p.match_id AND t.puuid = p.puuid)
