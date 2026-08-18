@@ -68,6 +68,9 @@ button.on { background: #2f4d38; border-color: var(--ok); }
 .victoria { color: var(--ok); }
 .tags { display: flex; gap: 6px; }
 .hint { color: var(--dim); font-size: 13px; margin: 0 0 10px; }
+.barra { height: 6px; background: #0b0d11; border-radius: 3px; overflow: hidden; margin-top: 10px; }
+.barra > div { height: 100%; background: var(--ok); width: 0; transition: width .2s; }
+.log { color: var(--dim); font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
 `;
 
 const SCRIPT = `
@@ -258,6 +261,61 @@ async function guardarTilt(tilt, row) {
   }
 }
 
+function renderSync() {
+  const box = document.getElementById('sync');
+  box.replaceChildren();
+  const card = el('div', 'card');
+  const boton = el('button', null, 'Sincronizar ahora');
+  const barra = el('div', 'barra');
+  const relleno = el('div');
+  barra.append(relleno);
+  const log = el('div', 'log');
+  card.append(boton, barra, log);
+  box.append(card);
+
+  boton.onclick = () => {
+    boton.disabled = true;
+    log.textContent = 'conectando…';
+    relleno.style.width = '0';
+
+    // EventSource cannot send headers, which is exactly why the token lives in the query string
+    // rather than in an Authorization header.
+    const src = new EventSource('/api/sync?t=' + TOKEN + '&cuenta=smurf');
+    src.onmessage = (msg) => {
+      const e = JSON.parse(msg.data);
+      if (e.tipo === 'inicio') log.textContent = 'sincronizando ' + e.cuenta + '…';
+      if (e.tipo === 'progreso') {
+        relleno.style.width = (e.total === 0 ? 0 : (e.hechas / e.total) * 100) + '%';
+        log.textContent = e.hechas + ' de ' + e.total;
+      }
+      if (e.tipo === 'fin') {
+        relleno.style.width = '100%';
+        log.textContent =
+          e.bajadas + ' nueva(s), ' + e.timelines + ' timeline(s), ' + e.remakes + ' remake(s)' +
+          (e.errores.length ? '\n' + e.errores.slice(0, 3).join('\n') : '');
+        src.close();
+        boton.disabled = false;
+        void renderPendientes();
+        void refrescar();
+      }
+      if (e.tipo === 'error') {
+        log.textContent = 'no corrió: ' + e.mensaje;
+        src.close();
+        boton.disabled = false;
+      }
+    };
+    // Fires when the stream drops without a 'fin' — a dead key, a closed laptop. The button has
+    // to come back, or the page is bricked until a reload.
+    src.onerror = () => {
+      src.close();
+      boton.disabled = false;
+      if (!log.textContent || log.textContent === 'conectando…') {
+        log.textContent = 'se cortó la conexión con el servidor';
+      }
+    };
+  };
+}
+
 async function refrescar() {
   try {
     const e = await api('/api/estado');
@@ -271,6 +329,7 @@ async function refrescar() {
 }
 
 refrescar();
+renderSync();
 renderPendientes().catch((err) => {
   document.getElementById('error').textContent = 'Error: ' + err.message;
 });
@@ -309,6 +368,9 @@ El token cambia en cada arranque, así que un favorito viejo no sirve.</p>
 
   <h2>Qué hacer ahora</h2>
   <div id="acciones"></div>
+
+  <h2>Sincronizar</h2>
+  <div id="sync"></div>
 
   <h2>Taguear</h2>
   <div id="pendientes"></div>

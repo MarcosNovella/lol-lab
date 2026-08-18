@@ -9,6 +9,9 @@ import {
   estado,
   pendientes,
   RouteError,
+  type SyncEvento,
+  sincronizar,
+  syncEnCurso,
   taguear,
 } from '../src/ui/routes.ts';
 import { guard, HOST, newToken } from '../src/ui/server.ts';
@@ -234,5 +237,87 @@ describe('la captura por click', () => {
       | { session_id: number }
       | undefined;
     expect(row?.session_id).toBe(sesion);
+  });
+});
+
+describe('el sync', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'smurf-puuid',
+      gameName: 'LegendofTorcuato',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+  });
+
+  const okSync = async (
+    _puuid: string,
+    onProgress: (done: number, total: number) => void,
+  ): Promise<{ fetched: number; timelines: number; remakes: number; errors: string[] }> => {
+    onProgress(1, 2);
+    onProgress(2, 2);
+    return { fetched: 2, timelines: 2, remakes: 0, errors: [] };
+  };
+
+  it('streams start, progress and finish, in that order', async () => {
+    const eventos: SyncEvento[] = [];
+    await sincronizar(db, 'smurf', (e) => eventos.push(e), { sync: okSync });
+    expect(eventos.map((e) => e.tipo)).toEqual(['inicio', 'progreso', 'progreso', 'fin']);
+  });
+
+  it('refuses a second sync while one is running', async () => {
+    let soltar: () => void = () => {};
+    const lento = new Promise<void>((resolve) => {
+      soltar = resolve;
+    });
+
+    const primero = sincronizar(db, 'smurf', () => {}, {
+      sync: async () => {
+        await lento;
+        return { fetched: 0, timelines: 0, remakes: 0, errors: [] };
+      },
+    });
+
+    expect(syncEnCurso()).toBe(true);
+    // Two syncs would each hold their own limiter, and between them could blow the
+    // 100-per-2-minutes budget — which Riot answers with 429s that read like a dead key.
+    await expect(sincronizar(db, 'smurf', () => {}, { sync: okSync })).rejects.toThrow(RouteError);
+
+    soltar();
+    await primero;
+    expect(syncEnCurso()).toBe(false);
+  });
+
+  it('releases the lock when the sync fails, instead of wedging the button forever', async () => {
+    const eventos: SyncEvento[] = [];
+    await sincronizar(db, 'smurf', (e) => eventos.push(e), {
+      sync: async () => {
+        throw new Error('key vencida');
+      },
+    });
+    // The failure is REPORTED, not thrown: the stream has to carry it to the page.
+    expect(eventos.at(-1)).toEqual({ tipo: 'error', mensaje: 'key vencida' });
+    expect(syncEnCurso()).toBe(false);
+  });
+
+  it('does not let the rank clock turn a good sync into a failed one', async () => {
+    const eventos: SyncEvento[] = [];
+    await sincronizar(db, 'smurf', (e) => eventos.push(e), {
+      sync: okSync,
+      rango: async () => {
+        throw new Error('league-v4 caída');
+      },
+    });
+    // The clock is a nice-to-have and the sync is not; today it simply does not advance.
+    expect(eventos.at(-1)?.tipo).toBe('fin');
+  });
+
+  it('refuses an unknown account before touching the lock', async () => {
+    await expect(sincronizar(db, 'main', () => {}, { sync: okSync })).rejects.toThrow(RouteError);
+    expect(syncEnCurso()).toBe(false);
   });
 });

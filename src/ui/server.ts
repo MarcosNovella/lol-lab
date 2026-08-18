@@ -1,9 +1,21 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { snapshotAll } from '../cli/rank.ts';
+import { createClient } from '../riot/client.ts';
 import type { Db } from '../store/db.ts';
 import { openDb } from '../store/db.ts';
+import { syncMatches } from '../sync.ts';
 import { renderShell } from './page.ts';
-import { abrirSesion, cerrarSesion, estado, pendientes, RouteError, taguear } from './routes.ts';
+import {
+  abrirSesion,
+  cerrarSesion,
+  estado,
+  pendientes,
+  RouteError,
+  type SyncEvento,
+  sincronizar,
+  taguear,
+} from './routes.ts';
 
 /**
  * The local UI server.
@@ -119,6 +131,21 @@ const numOrNull = (body: Record<string, unknown>, field: string): number | null 
   return value;
 };
 
+/**
+ * Server-Sent Events: the browser speaks this natively, so a progress stream costs no
+ * dependency and no WebSocket handshake (ADR-003).
+ */
+function sse(response: ServerResponse): (evento: SyncEvento) => void {
+  response.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-store',
+    connection: 'keep-alive',
+  });
+  return (evento) => {
+    response.write(`data: ${JSON.stringify(evento)}\n\n`);
+  };
+}
+
 export type UiServer = { server: Server; url: string; token: string; port: number };
 
 export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiServer> {
@@ -197,6 +224,27 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
       const sesion = numOrNull(body, 'sesion');
       if (sesion === null) throw new RouteError(400, "falta 'sesion'");
       json(response, 200, cerrarSesion(db, { sesion, tilt: numOrNull(body, 'tilt') }));
+      return;
+    }
+    if (url.pathname === '/api/sync') {
+      const emit = sse(response);
+      await sincronizar(db, cuenta, emit, {
+        sync: async (puuid, onProgress) => {
+          const client = createClient();
+          return syncMatches(client, db, {
+            puuid,
+            max: 20,
+            // Without timelines there are no expensive moments, which is most of what the page
+            // has to show afterwards.
+            withTimeline: true,
+            onProgress,
+          });
+        },
+        rango: async () => {
+          await snapshotAll(db);
+        },
+      });
+      response.end();
       return;
     }
     json(response, 404, { error: `no existe ${url.pathname}` });

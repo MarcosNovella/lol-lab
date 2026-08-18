@@ -257,3 +257,86 @@ export function cerrarSesion(
   closeSession(db, input.sesion, input.tilt, now);
   return { ok: true };
 }
+
+// ------------------------------------------------------------------------ el sync
+
+/**
+ * One sync at a time, process-wide.
+ *
+ * Two concurrent syncs would each hold their own rate limiter and between them could exceed the
+ * 100-requests-per-2-minutes budget, which Riot answers with 429s that look like a broken key.
+ * A double-click on the button must not be able to cause that.
+ *
+ * THE LIMIT THIS DOES NOT FIX, stated rather than papered over: the MCP server is a SEPARATE
+ * PROCESS with its own limiter, so `riot_sync` running at the same time as this can still blow
+ * the budget between them. The correct answer for a one-user tool is not to run both at once,
+ * not to invent shared-limiter machinery for a problem that has a one-line habit as its cure.
+ */
+let corriendo = false;
+
+export function syncEnCurso(): boolean {
+  return corriendo;
+}
+
+export type SyncEvento =
+  | { tipo: 'inicio'; cuenta: string }
+  | { tipo: 'progreso'; hechas: number; total: number }
+  | { tipo: 'fin'; bajadas: number; timelines: number; remakes: number; errores: string[] }
+  | { tipo: 'error'; mensaje: string };
+
+/**
+ * Runs a sync, reporting progress as it goes.
+ *
+ * Streamed rather than returned because a sync with timelines moves at roughly 25 games a
+ * minute: a request that answers only at the end would sit silent for minutes and look hung.
+ * `syncMatches` already accepts an `onProgress`, so the stream is built out of what exists.
+ */
+export async function sincronizar(
+  db: Db,
+  cuenta: string,
+  emit: (evento: SyncEvento) => void,
+  deps: {
+    sync: (
+      puuid: string,
+      onProgress: (done: number, total: number) => void,
+    ) => Promise<{
+      fetched: number;
+      timelines: number;
+      remakes: number;
+      errors: string[];
+    }>;
+    rango?: () => Promise<void>;
+  },
+): Promise<void> {
+  if (corriendo) throw new RouteError(409, 'ya hay un sync corriendo');
+  const { puuid, label } = cuentaDe(db, cuenta);
+  corriendo = true;
+  try {
+    emit({ tipo: 'inicio', cuenta: label });
+    const result = await deps.sync(puuid, (hechas, total) =>
+      emit({ tipo: 'progreso', hechas, total }),
+    );
+    // The rank clock is a nice-to-have and the sync is not: a failure here must not turn a
+    // successful sync into a reported failure.
+    if (deps.rango) {
+      try {
+        await deps.rango();
+      } catch {
+        /* the clock simply does not advance today */
+      }
+    }
+    emit({
+      tipo: 'fin',
+      bajadas: result.fetched,
+      timelines: result.timelines,
+      remakes: result.remakes,
+      errores: result.errors,
+    });
+  } catch (error) {
+    emit({ tipo: 'error', mensaje: error instanceof Error ? error.message : String(error) });
+  } finally {
+    // In `finally` on purpose: an early return or a throw that left this true would wedge the
+    // button for the rest of the process's life, with no way back but a restart.
+    corriendo = false;
+  }
+}
