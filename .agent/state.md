@@ -267,6 +267,43 @@ NOT DONE, and it is the first thing next session: **none of this has touched his
 `team_state_dominates` / `growth_drift` still need REGISTERING — the code is there, the
 registration is a dated act that has to happen where the games are.
 
+SESSION 2026-08-18 (S6, misma jornada) — **`lol ui`**. Marcos pidió *"una UI que ejecute las
+cosas sola, o de última que me diga qué tengo que ejecutar"*, lo que revisa ADR-001, ADR-007 y
+ADR-014 de una sola vez. Es su llamada y la revisión es legítima por un motivo concreto: **la
+página estática no puede actuar** — se abre con `file://`, así que no sincroniza, no le pega a la
+API y no escribe en SQLite. ADR-018 registra la decisión entera.
+
+Tres decisiones más (D6/D7/D8): un servidor local con `lol ui`, la UI ejecuta todo, y nada corre
+en segundo plano si él no abrió la página.
+
+Construido, `src/ui/` como TERCER front-end sobre `src/analysis/*`, que no se tocó:
+- **M11** servidor `node:http` en 127.0.0.1 + panel "qué hacer ahora". `/api/estado` no gasta un
+  solo request, que es lo que hace seguro pollearlo.
+- **M12** la captura por click: una request por partida, escrita antes de responder.
+- **M13** sync por SSE con barra de progreso, mutex liberado en `finally`.
+- **M14** momentos caros, curva, mapa de muertes, cobertura, ledger y prep.
+
+Guardas: token por arranque + chequeo de `Origin` en los POST, bind a 127.0.0.1 nunca 0.0.0.0, y
+la key NO viaja al navegador (pineado por FORMA, así que agregar un campo falla en vez de filtrar).
+
+**TRES DEFECTOS QUE SOLO APARECIERON CORRIENDO LAS COSAS:**
+1. **El script del cliente no compilaba, y todo estaba verde.** Vive dentro de un template
+   literal, donde `\n` es un salto de línea REAL, así que una cadena escrita como `'\n'` salía
+   partida en dos y el script entero era inválido. La página habría cargado sin hacer nada, con
+   tsc, Biome y Vitest los tres en verde, porque ninguno mira adentro de un string. **G-022**, y
+   ahora un test lo compila con `new Function`.
+2. **`spawn` falla de forma asíncrona**, así que el try/catch alrededor no atrapaba nada y la UI
+   entera se moría en una máquina sin `xdg-open` — después de haber impreso su URL. **G-021**.
+3. "Nunca sincronizado" y "sincronizado hace mucho" se estaban confundiendo: un timestamp ausente
+   mapeado a 0 daba una antigüedad de quinientas mil horas.
+
+Verificado a mano, no afirmado: **`kill -9` al servidor a mitad del tagueo deja los tags ya
+clickeados en la base** y la sesión honestamente abierta (`closed_at` y `tilt` en NULL). Y el
+camino que de verdad va a pasar —sync con la key vencida— emite el error por el stream, devuelve
+el botón y deja la UI viva.
+
+verify verde, 217 → 248 tests. `pnpm smoke` verde con 14 tools.
+
 Open questions:
 - **Registering the two new hypotheses is pending and time-sensitive in the same way §1 was.**
   Both need their arbitrary knobs swept at registration (G-011): band and teamBand for the team

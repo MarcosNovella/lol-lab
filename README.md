@@ -52,21 +52,27 @@ Para dejar de rotarla, pedí una **Personal API Key** en el mismo portal
 
 ## El ritual
 
-Cuando terminás de jugar, un solo comando:
+Cuando terminás de jugar:
 
 ```bash
-pnpm lol cerrar
+pnpm lol ui
 ```
 
-Sincroniza, te pide **una tecla por partida** (`y` la produje yo · `i` salía igual · `p` estuvo
-pareja) y un tilt del 1 al 5, y te devuelve los tres momentos más caros de cada partida con el
-minuto exacto para abrir el replay. Al final dice qué cambió — y se calla cuando no cambió nada.
+Abre el panel en el navegador y a partir de ahí no volvés a la terminal. Arriba te dice **qué
+hacer ahora** y por qué; abajo están el botón de sincronizar con su barra de progreso, las
+partidas sin taguear con tres botones cada una, los momentos más caros, la curva, el mapa de
+muertes, la cobertura y el ledger.
 
-El tag es lo único que el software no puede sacar solo, y es lo que separa "jugué mal" de "me
-tocó mal". Una partida sin taguear no se puede taguear en noviembre.
+El **tag** es lo único que el software no puede sacar solo, y es lo que separa "jugué mal" de
+"me tocó mal". Cada click se guarda en el momento: si cerrás la pestaña a la mitad, lo que ya
+marcaste queda. Una partida sin taguear no se puede taguear en noviembre.
 
-`pnpm lol` solo, sin argumentos, lista todo lo demás: `report`, `prep`, `cobertura`, `growth`,
-`page`, `hip`, `rank`.
+El servidor escucha solo en `127.0.0.1` y la URL lleva un token que cambia en cada arranque, así
+que guardar el favorito no sirve. Ctrl-C lo apaga.
+
+Si preferís la terminal, `pnpm lol cerrar` hace el mismo ritual con una tecla por partida
+(`y` la produje yo · `i` salía igual · `p` estuvo pareja). `pnpm lol` solo lista todo lo demás:
+`report`, `prep`, `cobertura`, `growth`, `page`, `hip`, `rank`.
 
 ## Las tools
 
@@ -122,9 +128,14 @@ siguientes solo traen lo nuevo.
 ```bash
 pnpm verify   # Biome + tsc + Vitest, la puerta de "listo"
 pnpm fix      # autoformat
-pnpm smoke    # levanta el servidor real y ejercita las tools
+pnpm smoke    # levanta el servidor MCP real y ejercita las tools
 pnpm lol      # los rituales, desde la terminal
+pnpm lol ui   # el panel
 ```
+
+Tres front-ends sobre una sola librería (`src/analysis/`, pura y sin I/O): el servidor MCP para
+conversar, la CLI para los rituales, y la UI local. Si algo te obliga a tocar `src/analysis/`
+para agregar una vista, el seam está mal.
 
 Dos cosas que hay que saber antes de tocar el código:
 
@@ -142,4 +153,5 @@ El resto de las decisiones y las trampas conocidas están en `.agent/`.
 - No reemplaza a `vault/90-meta/scripts/opgg_pull.py`: op.gg sigue siendo la fuente del
   meta (winrate de matchups sobre muestras de miles de partidas), que Riot no da. Son
   complementarias.
-- No es una app. Es un servidor de datos para conversar; la UI se decide más adelante.
+- No es una app en la nube. La UI corre en tu máquina, escucha solo en localhost y no publica
+  nada: si el proceso no está levantado, no hay UI.
