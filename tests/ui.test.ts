@@ -27,7 +27,7 @@ import {
   syncEnCurso,
   taguear,
 } from '../src/ui/routes.ts';
-import { guard, HOST, newToken } from '../src/ui/server.ts';
+import { guard, HOST, newToken, startUiOnFreePort } from '../src/ui/server.ts';
 import { match, participant } from './fixtures.ts';
 
 /**
@@ -473,5 +473,34 @@ describe('la memoización del mapa de muertes', () => {
     const despues = graficos(db, 'smurf');
     expect(despues).not.toBe(antes);
     expect(despues.partidas).toBe(1);
+  });
+});
+
+describe('el arranque', () => {
+  it('moves to the next free port instead of dying on a busy one', async () => {
+    const db = openDb(':memory:');
+    // A busy 4477 is ordinary — a second window, a leftover process — and this is launched from
+    // a desktop shortcut whose window closes, so an EADDRINUSE there would be an error he never
+    // gets to read.
+    const primero = await startUiOnFreePort({ port: 45810, db });
+    const segundo = await startUiOnFreePort({ port: 45810, db });
+
+    expect(primero.port).toBe(45810);
+    expect(segundo.port).toBe(45811);
+    // Each boot mints its own secret, so two windows cannot drive each other.
+    expect(segundo.token).not.toBe(primero.token);
+
+    await new Promise<void>((r) => primero.server.close(() => r()));
+    await new Promise<void>((r) => segundo.server.close(() => r()));
+    db.close();
+  });
+
+  it('gives up after the range instead of scanning forever', async () => {
+    const db = openDb(':memory:');
+    const ocupado = await startUiOnFreePort({ port: 45820, db });
+    // tries: 0 means "this port or nothing", which is the shape that proves the loop is bounded.
+    await expect(startUiOnFreePort({ port: 45820, db, tries: 0 })).rejects.toThrow();
+    await new Promise<void>((r) => ocupado.server.close(() => r()));
+    db.close();
   });
 });

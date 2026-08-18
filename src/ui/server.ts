@@ -35,6 +35,9 @@ import {
 
 export const HOST = '127.0.0.1';
 export const DEFAULT_PORT = 4477;
+/** How many ports to try past the first. A busy 4477 is an ordinary situation — a second window,
+ *  a leftover process — and it must not be a dead end behind a shortcut that closes itself. */
+export const PORT_TRIES = 9;
 
 /**
  * Per-boot secret, required on every request.
@@ -152,6 +155,32 @@ function sse(response: ServerResponse): (evento: SyncEvento) => void {
 }
 
 export type UiServer = { server: Server; url: string; token: string; port: number };
+
+/**
+ * Boots on the first free port from `port` upward.
+ *
+ * Fixed ports collide, and this is launched from a desktop shortcut whose window closes: an
+ * EADDRINUSE there is invisible, so "it just doesn't work" would be the whole error message he
+ * ever sees. Any other listen error still rejects — a port being taken is expected, a permission
+ * problem is not, and collapsing the two would hide the second.
+ */
+export async function startUiOnFreePort(
+  options: { port?: number; db?: Db; tries?: number } = {},
+): Promise<UiServer> {
+  const first = options.port ?? DEFAULT_PORT;
+  const tries = options.tries ?? PORT_TRIES;
+  let last: unknown = null;
+  for (let offset = 0; offset <= tries; offset += 1) {
+    try {
+      return await startUi({ ...options, port: first + offset });
+    } catch (error) {
+      const code = (error as { code?: string } | null)?.code;
+      if (code !== 'EADDRINUSE') throw error;
+      last = error;
+    }
+  }
+  throw last ?? new Error(`no free port between ${first} and ${first + tries}`);
+}
 
 export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiServer> {
   const port = options.port ?? DEFAULT_PORT;
@@ -281,10 +310,14 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
   }
 
   return new Promise<UiServer>((resolve, reject) => {
-    server.once('error', reject);
+    const onListenError = (error: unknown): void => reject(error);
+    server.once('error', onListenError);
     // 127.0.0.1, never 0.0.0.0: this process holds the Riot key, and nothing on the network has
     // any business reaching it.
     server.listen(port, HOST, () => {
+      // Stop treating errors as boot failures: from here on a socket error is a live-server
+      // problem, and leaving this attached would try to reject an already-settled promise.
+      server.off('error', onListenError);
       resolve({ server, url: `${origin}/?t=${token}`, token, port });
     });
   });

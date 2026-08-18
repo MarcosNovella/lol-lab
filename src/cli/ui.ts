@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
-import { DEFAULT_PORT, startUi } from '../ui/server.ts';
+import { existsSync } from 'node:fs';
+import { DEFAULT_DB_PATH } from '../store/db.ts';
+import { DEFAULT_PORT, startUiOnFreePort } from '../ui/server.ts';
 import { CliError, out } from './shared.ts';
 
 /**
@@ -19,7 +21,11 @@ function openBrowser(url: string): void {
   // screen and opening a browser is a convenience, not the job.
   const command =
     process.platform === 'win32' ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
-  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
+  // The URL is QUOTED for cmd: `start` treats `&` as a command separator, so an unquoted URL
+  // with a query string is a command injection into your own shell at worst and a browser that
+  // opens half a URL at best. Ours carries `?t=` and, since the port can now shift, a `&` is one
+  // edit away.
+  const args = process.platform === 'win32' ? ['/c', 'start', '', `"${url}"`] : [url];
   const child = spawn(command, args, { detached: true, stdio: 'ignore' });
   // `spawn` reports a missing binary ASYNCHRONOUSLY, through an 'error' event — a try/catch
   // around the call looks like it handles that and handles nothing. Without this listener the
@@ -29,6 +35,28 @@ function openBrowser(url: string): void {
   child.unref();
 }
 
+/**
+ * Says what is wrong before the browser opens on a page that cannot work.
+ *
+ * Every line here is defensive about a machine I cannot test from: this is developed on Linux
+ * and run on Windows. It WARNS and does not block — Node 22 runs the whole suite green despite
+ * `engines` asking for 24, so refusing to start on a version number would be refusing over a
+ * number rather than over a capability.
+ */
+function preflight(): void {
+  const major = Number(process.versions.node.split('.')[0] ?? 0);
+  if (major < 22) {
+    out(`  aviso: Node ${process.versions.node}. Hace falta 22 o superior por node:sqlite y por`);
+    out('  el borrado de tipos sin compilador; abajo de eso esto no arranca.');
+  }
+
+  // Not an error and not a warning: a first run has no cache, and saying "no existe la base"
+  // as a problem would teach him that a normal state is a broken one.
+  if (!existsSync(DEFAULT_DB_PATH)) {
+    out('  (todavía no hay caché — la primera sincronización la crea)');
+  }
+}
+
 export async function run(argv: string[]): Promise<void> {
   const portArg = argv[0];
   const port = portArg === undefined ? DEFAULT_PORT : Number(portArg);
@@ -36,19 +64,17 @@ export async function run(argv: string[]): Promise<void> {
     throw new CliError(`puerto inválido '${portArg}'`);
   }
 
-  let ui: Awaited<ReturnType<typeof startUi>>;
+  preflight();
+
+  let ui: Awaited<ReturnType<typeof startUiOnFreePort>>;
   try {
-    ui = await startUi({ port });
+    ui = await startUiOnFreePort({ port });
   } catch (error) {
-    const why = error instanceof Error ? error.message : String(error);
-    throw new CliError(
-      why.includes('EADDRINUSE')
-        ? `el puerto ${port} está ocupado — probá 'lol ui ${port + 1}', o cerrá la otra ventana`
-        : why,
-    );
+    throw new CliError(error instanceof Error ? error.message : String(error));
   }
 
   out(`lol ui en ${ui.url}`);
+  if (ui.port !== port) out(`  (el ${port} estaba ocupado, usé el ${ui.port})`);
   out();
   out('  El token cambia en cada arranque, así que guardar el favorito no sirve de nada.');
   out('  Ctrl-C para apagarlo.');
