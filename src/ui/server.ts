@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { Db } from '../store/db.ts';
 import { openDb } from '../store/db.ts';
 import { renderShell } from './page.ts';
-import { estado } from './routes.ts';
+import { abrirSesion, cerrarSesion, estado, pendientes, RouteError, taguear } from './routes.ts';
 
 /**
  * The local UI server.
@@ -82,6 +82,43 @@ function html(response: ServerResponse, body: string): void {
   response.end(body);
 }
 
+/** Reads a JSON body, with a cap: nothing this API accepts is remotely near it, and an
+ *  unbounded read is a way to be held open by a request that never ends. */
+async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += (chunk as Buffer).length;
+    if (size > 64_000) throw new RouteError(413, 'cuerpo demasiado grande');
+    chunks.push(chunk as Buffer);
+  }
+  if (chunks.length === 0) return {};
+  try {
+    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if (typeof parsed !== 'object' || parsed === null) throw new Error('no es un objeto');
+    return parsed as Record<string, unknown>;
+  } catch {
+    throw new RouteError(400, 'cuerpo JSON inválido');
+  }
+}
+
+const str = (body: Record<string, unknown>, field: string): string => {
+  const value = body[field];
+  if (typeof value !== 'string' || value === '') {
+    throw new RouteError(400, `falta '${field}'`);
+  }
+  return value;
+};
+
+const numOrNull = (body: Record<string, unknown>, field: string): number | null => {
+  const value = body[field];
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new RouteError(400, `'${field}' tiene que ser un número o null`);
+  }
+  return value;
+};
+
 export type UiServer = { server: Server; url: string; token: string; port: number };
 
 export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiServer> {
@@ -91,6 +128,15 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
   const db = options.db ?? openDb();
 
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+    void handle(request, response).catch((error: unknown) => {
+      if (!response.headersSent) {
+        const status = error instanceof RouteError ? error.status : 500;
+        json(response, status, { error: error instanceof Error ? error.message : String(error) });
+      }
+    });
+  });
+
+  async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? '/', origin);
 
     // The shell is served without a token so a bare `localhost:4477` is not a dead end; it
@@ -113,22 +159,48 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
       return;
     }
 
-    try {
-      if (url.pathname === '/') {
-        html(response, renderShell(token));
-        return;
-      }
-      if (url.pathname === '/api/estado') {
-        json(response, 200, estado(db));
-        return;
-      }
-      json(response, 404, { error: `no existe ${url.pathname}` });
-    } catch (error) {
-      // The message is shown in the page, so it goes through nothing that could carry a key:
-      // every error surface in this project is subject to G-002.
-      json(response, 500, { error: error instanceof Error ? error.message : String(error) });
+    const cuenta = url.searchParams.get('cuenta') ?? 'smurf';
+
+    if (url.pathname === '/') {
+      html(response, renderShell(token));
+      return;
     }
-  });
+    if (url.pathname === '/api/estado') {
+      json(response, 200, estado(db));
+      return;
+    }
+    if (url.pathname === '/api/pendientes') {
+      json(response, 200, pendientes(db, cuenta));
+      return;
+    }
+    if (url.pathname === '/api/sesion/abrir' && request.method === 'POST') {
+      json(response, 200, abrirSesion(db, cuenta));
+      return;
+    }
+    if (url.pathname === '/api/tag' && request.method === 'POST') {
+      const body = await readJson(request);
+      // The write happens before the response is written, so a 200 means the tag is on disk.
+      json(
+        response,
+        200,
+        taguear(db, {
+          cuenta,
+          matchId: str(body, 'matchId'),
+          tag: str(body, 'tag'),
+          sesion: numOrNull(body, 'sesion'),
+        }),
+      );
+      return;
+    }
+    if (url.pathname === '/api/sesion/cerrar' && request.method === 'POST') {
+      const body = await readJson(request);
+      const sesion = numOrNull(body, 'sesion');
+      if (sesion === null) throw new RouteError(400, "falta 'sesion'");
+      json(response, 200, cerrarSesion(db, { sesion, tilt: numOrNull(body, 'tilt') }));
+      return;
+    }
+    json(response, 404, { error: `no existe ${url.pathname}` });
+  }
 
   return new Promise<UiServer>((resolve, reject) => {
     server.once('error', reject);

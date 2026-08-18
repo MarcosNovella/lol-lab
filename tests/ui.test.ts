@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { tagGame } from '../src/analysis/capture.ts';
+import { tagGame, tagOf } from '../src/analysis/capture.ts';
 import { flattenMatch } from '../src/analysis/flatten.ts';
 import { type Db, openDb } from '../src/store/db.ts';
 import { finishSyncLog, saveMatch, startSyncLog, upsertAccount } from '../src/store/matches.ts';
-import { estado } from '../src/ui/routes.ts';
+import {
+  abrirSesion,
+  cerrarSesion,
+  estado,
+  pendientes,
+  RouteError,
+  taguear,
+} from '../src/ui/routes.ts';
 import { guard, HOST, newToken } from '../src/ui/server.ts';
 import { match, participant } from './fixtures.ts';
 
@@ -144,5 +151,88 @@ describe('estado', () => {
       'problema',
       'tipo',
     ]);
+  });
+});
+
+describe('la captura por click', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'smurf-puuid',
+      gameName: 'LegendofTorcuato',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+  });
+
+  it('lists the pending games OLDEST first', () => {
+    seedGame(db, 'LA2_VIEJA', CREATION);
+    seedGame(db, 'LA2_NUEVA', CREATION + HOUR);
+    // He replays the session in the order he lived it. `untaggedGames` hands back newest first
+    // because every other consumer wants that, so the flip belongs here and is worth pinning.
+    expect(pendientes(db, 'smurf').partidas.map((p) => p.matchId)).toEqual([
+      'LA2_VIEJA',
+      'LA2_NUEVA',
+    ]);
+  });
+
+  it('writes the tag BEFORE returning, which is the whole guarantee', () => {
+    seedGame(db, 'LA2_A', CREATION);
+    const ended = CREATION + 1800 * 1000;
+    taguear(db, { cuenta: 'smurf', matchId: 'LA2_A', tag: 'mía' }, ended + 10 * 60_000);
+
+    // Verified for real by SIGKILLing the server mid-ritual: the tags already clicked were on
+    // disk and the session row stayed honestly open. This is that property, in a unit.
+    expect(tagOf(db, 'LA2_A', 'smurf-puuid')).toBe('mía');
+    expect(pendientes(db, 'smurf').partidas).toHaveLength(0);
+  });
+
+  it('reports the recall lag, measured from the END of the game', () => {
+    seedGame(db, 'LA2_A', CREATION);
+    const ended = CREATION + 1800 * 1000;
+    const result = taguear(db, { cuenta: 'smurf', matchId: 'LA2_A', tag: 'pareja' }, ended + HOUR);
+    // One hour, not one hour and a half: a 30-minute game tagged an hour after it finished did
+    // not decay for the time it was being played (ADR-015).
+    expect(result.atrasoMs).toBe(HOUR);
+  });
+
+  it('refuses a tag it does not know instead of storing it', () => {
+    seedGame(db, 'LA2_A', CREATION);
+    expect(() =>
+      taguear(db, { cuenta: 'smurf', matchId: 'LA2_A', tag: 'culpa del jungla' }),
+    ).toThrow(RouteError);
+    expect(tagOf(db, 'LA2_A', 'smurf-puuid')).toBeNull();
+  });
+
+  it('refuses a game this account did not play', () => {
+    expect(() => taguear(db, { cuenta: 'smurf', matchId: 'LA2_AJENA', tag: 'mía' })).toThrow();
+  });
+
+  it('refuses an account that is not in the cache', () => {
+    expect(() => pendientes(db, 'main')).toThrow(RouteError);
+  });
+
+  it('stores a declined tilt as NULL, never as a middling 3', () => {
+    const { sesion } = abrirSesion(db, 'smurf');
+    cerrarSesion(db, { sesion, tilt: null });
+    const row = db.prepare('SELECT tilt, closed_at FROM play_sessions WHERE id = ?').get(sesion) as
+      | { tilt: number | null; closed_at: number | null }
+      | undefined;
+    expect(row?.tilt).toBeNull();
+    // Closed, though: "he answered nothing" and "the sitting never ended" are different facts.
+    expect(row?.closed_at).not.toBeNull();
+  });
+
+  it('carries the session onto the tags typed during it', () => {
+    seedGame(db, 'LA2_A', CREATION);
+    const { sesion } = abrirSesion(db, 'smurf');
+    taguear(db, { cuenta: 'smurf', matchId: 'LA2_A', tag: 'igual', sesion });
+    const row = db.prepare('SELECT session_id FROM game_tags WHERE match_id = ?').get('LA2_A') as
+      | { session_id: number }
+      | undefined;
+    expect(row?.session_id).toBe(sesion);
   });
 });

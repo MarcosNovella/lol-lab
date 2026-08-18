@@ -1,8 +1,15 @@
-import { untaggedGames } from '../analysis/capture.ts';
+import {
+  closeSession,
+  openSession,
+  TAGS,
+  type Tag,
+  tagGame,
+  untaggedGames,
+} from '../analysis/capture.ts';
 import { describeRank, latestSnapshot, TRACKED_QUEUES } from '../analysis/rank.ts';
 import { keyState } from '../riot/key.ts';
 import type { Db } from '../store/db.ts';
-import { lastSync, listAccounts } from '../store/matches.ts';
+import { findAccount, lastSync, listAccounts } from '../store/matches.ts';
 
 /**
  * The UI's handlers, as functions over `Db` rather than over an HTTP request.
@@ -154,4 +161,99 @@ export function estado(db: Db, now: number = Date.now()): Estado {
     pendientesTotal,
     acciones,
   };
+}
+
+// ------------------------------------------------------------------------ la captura
+
+export class RouteError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function cuentaDe(db: Db, needle: string): { puuid: string; label: string } {
+  const found = findAccount(db, needle);
+  if (found === null) throw new RouteError(404, `no conozco la cuenta '${needle}'`);
+  return { puuid: found.puuid, label: found.label ?? found.gameName };
+}
+
+export type Pendiente = {
+  matchId: string;
+  terminoAt: number;
+  gano: boolean;
+  campeon: string;
+};
+
+/**
+ * The games still waiting for a tag, OLDEST FIRST.
+ *
+ * The order is not cosmetic and it is the same one `lol cerrar` uses: he replays the session in
+ * the order he lived it, which is the order he remembers it in. `untaggedGames` returns newest
+ * first because every other consumer wants that.
+ */
+export function pendientes(db: Db, cuenta: string): { cuenta: string; partidas: Pendiente[] } {
+  const { puuid, label } = cuentaDe(db, cuenta);
+  const partidas = untaggedGames(db, puuid, { limit: 50 })
+    .map((g) => ({
+      matchId: g.matchId,
+      terminoAt: g.endedAt,
+      gano: g.win,
+      campeon: g.champion,
+    }))
+    .reverse();
+  return { cuenta: label, partidas };
+}
+
+/**
+ * Records ONE tag.
+ *
+ * One game per request, on purpose. The browser must never collect the session's tags and post
+ * them at the end: closing the tab after three clicks has to leave three tags in the database.
+ * That is the same guarantee `lol cerrar` gives by committing inside its loop (ADR-016), and it
+ * is the reason this endpoint is deliberately not a batch one.
+ */
+export function taguear(
+  db: Db,
+  input: { cuenta: string; matchId: string; tag: string; sesion?: number | null },
+  now: number = Date.now(),
+): { ok: true; tag: Tag; atrasoMs: number } {
+  const { puuid } = cuentaDe(db, input.cuenta);
+  if (!TAGS.includes(input.tag as Tag)) {
+    throw new RouteError(400, `tag desconocido '${input.tag}' — esperaba ${TAGS.join(' | ')}`);
+  }
+  const tag = input.tag as Tag;
+  tagGame(db, { matchId: input.matchId, puuid, tag, sessionId: input.sesion ?? null }, now);
+
+  // The lag travels back so the page can show it. A tag typed twenty minutes after the game is
+  // observation; one typed on Thursday about Monday is memory, and the reader has to be able to
+  // tell them apart (ADR-015).
+  const row = db
+    .prepare(
+      `SELECT m.game_creation + m.game_duration * 1000 AS ended_at
+         FROM matches m WHERE m.match_id = ?`,
+    )
+    .get(input.matchId) as { ended_at: number } | undefined;
+  return { ok: true, tag, atrasoMs: row === undefined ? Number.NaN : now - Number(row.ended_at) };
+}
+
+export function abrirSesion(db: Db, cuenta: string, now: number = Date.now()): { sesion: number } {
+  const { puuid } = cuentaDe(db, cuenta);
+  return { sesion: openSession(db, puuid, now) };
+}
+
+/**
+ * Closes the sitting, with the tilt if he gave one.
+ *
+ * `tilt` is `number | null` and never absent: "he declined to answer" and "the page forgot to
+ * ask" have to store the same thing, and it must not be a middling 3 (G-005).
+ */
+export function cerrarSesion(
+  db: Db,
+  input: { sesion: number; tilt: number | null },
+  now: number = Date.now(),
+): { ok: true } {
+  closeSession(db, input.sesion, input.tilt, now);
+  return { ok: true };
 }
