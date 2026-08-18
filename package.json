@@ -12,6 +12,7 @@
     "verify": "biome check . && tsc --noEmit && vitest run",
     "fix": "biome check --write .",
     "test": "vitest",
+    "lol": "node --disable-warning=ExperimentalWarning src/cli.ts",
     "smoke": "node --disable-warning=ExperimentalWarning scripts/smoke.ts",
     "call": "node --disable-warning=ExperimentalWarning scripts/call.ts"
   },

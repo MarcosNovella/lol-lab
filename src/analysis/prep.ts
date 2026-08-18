@@ -132,13 +132,29 @@ export function prepMatchup(
 export type Confidence =
   | 'sin_datos'
   | 'solo_meta'
+  | 'poco_propio'
   | 'mayormente_meta'
   | 'mixto'
   | 'mayormente_propio';
 
 export function confidenceOf(prep: MatchupPrep): Confidence {
-  if (prep.prior === null && prep.own.games === 0) return 'sin_datos';
-  if (prep.own.games === 0) return 'solo_meta';
+  if (prep.own.games === 0) return prep.prior === null ? 'sin_datos' : 'solo_meta';
+
+  // WITHOUT A PRIOR, `ownWeight` IS 1 AT ANY n — there is nothing to blend with, so the share
+  // coming from his own record is the whole estimate whether he has thirty games or one. Reading
+  // the rung off the share alone therefore said `mayormente_propio` — "your record rules" — for a
+  // single game, which is precisely the n=1 number wearing a confident label this ladder exists
+  // to prevent. It surfaced the day the coverage tracker ran on a machine without the vault
+  // mounted, where every prior is absent.
+  //
+  // So the no-prior case gets its own rung instead of borrowing one. It is NOT `mayormente_meta`:
+  // that rung means thousands of op.gg games are carrying the estimate, and here there are none.
+  // And it improves only when his own record is genuinely worth something, which is the same
+  // threshold the shrinkage already encodes.
+  if (prep.prior === null) {
+    return prep.own.games >= SHRINKAGE_DEFAULT ? 'mayormente_propio' : 'poco_propio';
+  }
+
   if (prep.ownWeight < 0.25) return 'mayormente_meta';
   if (prep.ownWeight < 0.5) return 'mixto';
   return 'mayormente_propio';

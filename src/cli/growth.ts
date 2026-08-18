@@ -1,7 +1,7 @@
-import { drift, type GrowthCurve, growthCurve } from '../src/analysis/growth.ts';
-import { normaliseRole } from '../src/analysis/metrics.ts';
-import { openDb } from '../src/store/db.ts';
-import { findAccount } from '../src/store/matches.ts';
+import { drift, type GrowthCurve, growthCurve } from '../analysis/growth.ts';
+import { normaliseRole } from '../analysis/metrics.ts';
+import { openDb } from '../store/db.ts';
+import { account as accountOf, CliError, labelOf, out } from './shared.ts';
 
 /**
  * `lol growth <account> [metric] [role]` — one account's curve, with the confound drawn.
@@ -12,10 +12,6 @@ import { findAccount } from '../src/store/matches.ts';
  */
 
 const SPARK = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'] as const;
-
-function out(line: string): void {
-  process.stdout.write(`${line}\n`);
-}
 
 function bar(slot: number): string {
   return SPARK[Math.min(SPARK.length - 1, Math.max(0, slot))] ?? SPARK[0];
@@ -81,22 +77,27 @@ function render(curve: GrowthCurve): void {
   out('  así que el subrayado es el nivel ABSOLUTO del rival, medido, no su división.');
 }
 
-const [, , accountArg = 'smurf', metricArg = 'cs_first_10', roleArg = 'mid'] = process.argv;
+export function run(argv: string[]): void {
+  const [accountArg = 'smurf', metricArg = 'cs_first_10', roleArg = 'mid'] = argv;
+  const db = openDb();
+  try {
+    const account = accountOf(db, accountArg);
+    const role = normaliseRole(roleArg);
+    if (role === null) throw new CliError(`no existe el rol '${roleArg}'`);
 
-const db = openDb();
-const account = findAccount(db, accountArg);
-if (account === null) throw new Error(`no account '${accountArg}' in cache`);
-const role = normaliseRole(roleArg);
-if (role === null) throw new Error(`no role '${roleArg}'`);
+    render(
+      growthCurve(db, {
+        puuid: account.puuid,
+        accountLabel: labelOf(account),
+        metricKey: metricArg,
+        role,
+        queueId: 420,
+      }),
+    );
+  } finally {
+    db.close();
+  }
+}
 
-render(
-  growthCurve(db, {
-    puuid: account.puuid,
-    accountLabel: account.label ?? account.gameName,
-    metricKey: metricArg,
-    role,
-    queueId: 420,
-  }),
-);
-
-db.close();
+export const SUMMARY = 'tu curva en una cuenta, con el nivel del rival dibujado debajo';
+export const USAGE = 'lol growth [cuenta] [métrica] [rol]';

@@ -86,6 +86,32 @@ describe('shrinkage toward the meta prior', () => {
     expect(confidenceOf(prep)).toBe('mayormente_meta');
   });
 
+  it('does not call one game "your record rules" when there is no prior to blend with', () => {
+    // Without a prior `ownWeight` is 1 at ANY n — the estimate is entirely his record because
+    // there is nothing else in it — so reading the rung off the share alone reported
+    // `mayormente_propio` for a single game. That is the n=1 number wearing a confident label
+    // this ladder exists to prevent. It only surfaced once the coverage tracker ran on a machine
+    // where the vault, and therefore every prior, was absent.
+    const thin = prepMatchup([row({ account: 'smurf', games: 1, wins: 0 })], {
+      champion: 'Locke',
+      opponent: 'Akali',
+      account: 'smurf',
+      prior: null,
+    });
+    expect(thin.ownWeight).toBe(1);
+    expect(confidenceOf(thin)).toBe('poco_propio');
+
+    // And it is NOT `mayormente_meta` either: that rung claims thousands of op.gg games are
+    // carrying the estimate, and here there are none.
+    const solid = prepMatchup([row({ account: 'smurf', games: SHRINKAGE_DEFAULT, wins: 5 })], {
+      champion: 'Locke',
+      opponent: 'Akali',
+      account: 'smurf',
+      prior: null,
+    });
+    expect(confidenceOf(solid)).toBe('mayormente_propio');
+  });
+
   it('lets his own record take over once he has played it enough', () => {
     const prep = prepMatchup([row({ account: 'smurf', games: 30, wins: 24 })], {
       champion: 'Locke',

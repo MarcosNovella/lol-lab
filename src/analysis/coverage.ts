@@ -71,9 +71,12 @@ export type Coverage = {
 const RUNG: Record<Confidence, number> = {
   sin_datos: 0,
   solo_meta: 1,
-  mayormente_meta: 2,
-  mixto: 3,
-  mayormente_propio: 4,
+  // Below `mayormente_meta` on purpose: that rung has thousands of op.gg games carrying the
+  // estimate plus a couple of his own, this one has a handful of his own and nothing else.
+  poco_propio: 2,
+  mayormente_meta: 3,
+  mixto: 4,
+  mayormente_propio: 5,
 };
 
 /**

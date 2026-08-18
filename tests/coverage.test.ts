@@ -84,6 +84,19 @@ describe('coverage', () => {
     expect(at(need - 1)).toBe(found?.confidence);
   });
 
+  it('ranks a thin no-prior record below a meta-backed one', () => {
+    const rows = [
+      // Two of his own games and thousands of op.gg games behind them.
+      row({ champion: 'Diana', opponent: 'Sylas', games: 2 }),
+      // Three of his own and nothing else. Weaker, despite the larger own-record.
+      row({ champion: 'Yone', opponent: 'Ahri', games: 3 }),
+    ];
+    const order = coverageOf(rows, { account: 'smurf', priors: [PRIOR] }).rows;
+    expect(order.map((r) => r.opponent)).toEqual(['Ahri', 'Sylas']);
+    expect(order[0]?.confidence).toBe('poco_propio');
+    expect(order[1]?.confidence).toBe('mayormente_meta');
+  });
+
   it('returns 0 and a null next rung once the top is reached', () => {
     const rows = [row({ champion: 'Locke', opponent: 'Akali', games: SHRINKAGE_DEFAULT + 5 })];
     const found = coverageFor(rows, {
