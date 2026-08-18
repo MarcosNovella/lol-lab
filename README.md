@@ -33,7 +33,7 @@ Abrí `.env` en el editor y pegá la key después de `RIOT_API_KEY=`. Nada más.
 pnpm smoke
 ```
 
-Tiene que listar 7 tools y decir que la key está presente.
+Tiene que listar las 14 tools y decir que la key está presente.
 
 ## La key caduca cada 24 horas
 
@@ -50,7 +50,28 @@ Para dejar de rotarla, pedí una **Personal API Key** en el mismo portal
 | Personal | 20/s · 100 cada 2 min | no |
 | Production | 500/10s · 30.000/10 min | no (requiere producto aprobado) |
 
+## El ritual
+
+Cuando terminás de jugar, un solo comando:
+
+```bash
+pnpm lol cerrar
+```
+
+Sincroniza, te pide **una tecla por partida** (`y` la produje yo · `i` salía igual · `p` estuvo
+pareja) y un tilt del 1 al 5, y te devuelve los tres momentos más caros de cada partida con el
+minuto exacto para abrir el replay. Al final dice qué cambió — y se calla cuando no cambió nada.
+
+El tag es lo único que el software no puede sacar solo, y es lo que separa "jugué mal" de "me
+tocó mal". Una partida sin taguear no se puede taguear en noviembre.
+
+`pnpm lol` solo, sin argumentos, lista todo lo demás: `report`, `prep`, `cobertura`, `growth`,
+`page`, `hip`, `rank`.
+
 ## Las tools
+
+Dos prefijos: `riot_*` toca la API y la caché, `lol_*` le pregunta cosas al motor y no gasta
+un solo request.
 
 | Tool | Para qué |
 |---|---|
@@ -61,6 +82,12 @@ Para dejar de rotarla, pedí una **Personal API Key** en el mismo portal
 | `riot_benchmark` | **La importante.** Tus métricas contra los otros jugadores de tus propias partidas, de peor a mejor. |
 | `riot_match_detail` | Una partida completa; con timeline, las diferencias de oro/CS/XP a los 10, 15 y 20. |
 | `riot_cache_status` | Qué hay bajado, por cuenta y por cola. |
+| `lol_prep` | El matchup antes de jugarlo: tu récord en esa cuenta, tus reps en todas, y el meta. Separados. |
+| `lol_coverage` | De qué **no** puede hablar todavía, y cuántas partidas faltan. |
+| `lol_hypotheses` | El ledger: qué está registrado como predicción fechada y cómo va. |
+| `lol_tags` | Cómo se repartieron los resultados según a quién se los atribuiste. |
+| `lol_tag` | Taguear una partida suelta, para la noche que no corriste `lol cerrar`. |
+| `lol_rank` | Dónde está cada cuenta y qué se movió desde que arrancó el reloj. |
 
 Flujo típico la primera vez:
 
@@ -96,6 +123,7 @@ siguientes solo traen lo nuevo.
 pnpm verify   # Biome + tsc + Vitest, la puerta de "listo"
 pnpm fix      # autoformat
 pnpm smoke    # levanta el servidor real y ejercita las tools
+pnpm lol      # los rituales, desde la terminal
 ```
 
 Dos cosas que hay que saber antes de tocar el código:

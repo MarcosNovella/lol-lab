@@ -21,7 +21,7 @@ Log:
   conversion finding (14/20 vs 8/10).
 - 2026-08-16 S4: AUDIT (`roadmap.md` §0) — the conversion finding FAILS a minute sweep, plus
   four more defects. Then ROADMAP §1 BUILT: the hypothesis ledger, three findings registered.
-  ADR-010, G-011..014. verify green, 59 -> 88 tests. UNCOMMITTED.
+  ADR-010, G-011..014. verify green, 59 -> 88 tests. (Committed since; see the 2026-08-18 log.)
 
 Last done: roadmap §1 shipped. `hypotheses` + `hypothesis_evaluations` tables,
 `src/analysis/hypotheses.ts` (register · evaluate · retire, spec frozen by hash) and
@@ -66,7 +66,7 @@ flex history was incomplete (12 of 18 cached); now 69 smurf ranked games, 51 sol
 Also learned: op.gg timestamps game END, the cache `gameCreation` — a naive time join scores
 0/20 on games that are in fact identical.
 
-M4 mostly BUILT (2026-08-16), still uncommitted:
+M4 mostly BUILT (2026-08-16), committed in `688c21c`/`53d0656`:
 - The hard requirement, machine-checked: `MATCHUP_PERSPECTIVE` is a mapped type over every
   numeric field of `MatchupRow`, so a new number fails `tsc` until classified; `pool()` refuses
   to sum a `rendimiento` field across accounts, which makes a pooled win rate unreachable
@@ -197,38 +197,94 @@ undefined and matches no row. Retired with the reason, fixed, re-registered as `
 gap=3. `tsc` HAD flagged it — Node strips types without checking them, so the script ran anyway.
 Run verify BEFORE running a script, not after.
 
-Next: coverage tracker ("no puedo decirte nada de Diana vs Sylas, jugaste 2, necesito 6 más")
-and `lol review` weekly. Both pure LoL, both unblocked.
+SESSION 2026-08-18 (S5) — planning, then five milestones. Everything below is COMMITTED and
+`pnpm verify` is green at 217 tests (182 at session start), `pnpm smoke` green at 14 tools.
+
+**This session ran in a CLOUD container, not on his machine.** No `data/riot.db` (gitignored), no
+`.env`, no vault, no athlete-os. So: code and tests here, numbers on his machine. That split is
+DECIDED (D1) and every claim below was verified against tests or a seeded cache, never against
+his real games — nothing here has been run against the 69 real ones yet.
+
+Four decisions taken with him before building:
+- **D1** nube = código, local = datos. No number enters `.agent/` without the query having run.
+- **D2** ONE ritual, `lol cerrar`. He asked to build `lol review` and then chose the post-session
+  moment as the only moment he wants to be spoken to, so the review's content lives inside the
+  ritual and appears only when it has something to say. ADR-016.
+- **D3** Diana is decided by data, not now — which needs nothing built: `diana_needs_a_lead` is
+  already registered (n=5, needs 25). The real risk is that he has not played her in 8 games and
+  it may never reach n. Roadmap §3.1 can be closed on that basis.
+- **D4** the engine never writes markdown to the vault, only CSV to `_raw/lol/`. ADR-017, and it
+  closes roadmap §3.4.
+- **D5** athlete-os stays frozen: neither the WHOOP nor the personal key has arrived.
+
+**M6 — CAPTURE, at last.** ADR-007 decided it on 2026-08-16 and it had never been built: no
+table, no code, no mention anywhere. `play_sessions` + `game_tags`, `src/analysis/capture.ts`.
+The tag is REPORTED and fenced off structurally (ADR-015): `TAG_PROVENANCE` classifies every
+field, `peerComparable` throws on a reported one, and `splitByTag` has no peer counterpart —
+same shape as `pool()` refusing a cross-account win rate. Lag is measured against the game's END.
+Untagged games are counted, never folded in.
+
+**M8 — COVERAGE.** `src/analysis/coverage.ts`. `gamesToNext` is found by re-running the real
+`prepMatchup` at n+1, n+2… and asking `confidenceOf`, so moving the rungs moves this. Every
+result carries its scope (G-015). Reps pool, the record does not.
+
+**M9 — A3 SETTLED.** `LaneState.restOfTeamGoldDiff` removes his own lane pair from the team
+figure (r = 0.65 with `laneGoldDiff` was the problem). Added, not substituted. Two new ledger
+shapes it unblocked, `TeamStateSpec` and `GrowthSpec`, both freezing their arbitrary knobs —
+the growth one freezes the ROLLING WINDOW, since a rolling mean is endpoint-sensitive. Widening
+the `Spec` union made `tsc` flag every site that assumed two shapes, including `countGapGames`.
+The pinned lane hash is unchanged and now asserted in two files.
+
+**M7 — CLI + THE RITUAL.** `src/cli.ts` with cerrar · report · prep · cobertura · growth · page ·
+hip · rank. The ritual scripts are retired; `scripts/` keeps smoke, call, register-hypotheses and
+export-matchup-record. `lol cerrar` syncs, captures (committing each tag as it is typed), prints
+the expensive moments of the new games, then says what changed — and stays silent when nothing
+did.
+
+**M10 — MCP.** Six `lol_*` tools so the conversational side can finally see the engine. Read
+by default; `lol_hypotheses` needs `evaluate: true` to append, and `lol_tag` reports the lag it
+just recorded.
+
+FOUR DEFECTS FOUND BY RUNNING THINGS, none of them findable by reading:
+1. **`confidenceOf` said `mayormente_propio` for ONE game whenever no op.gg prior existed** —
+   with no prior there is nothing to blend with, so `ownWeight` is 1 at any n and the ladder read
+   the rung off that share. That is the n=1 number wearing a confident label the ladder exists to
+   prevent, and **it is the state the MAIN starts in**. New rung `poco_propio`, ranked below
+   `mayormente_meta`. G-019.
+2. **`pnpm smoke` asserted `tools.length !== 7`** and had been wrong since the 8th tool. Now
+   asserts NAMES. G-020.
+3. **A readline interface per prompt**: the first buffered all of stdin, the second saw EOF, so a
+   four-game session read one tag and died.
+4. **G-018 fired twice**, and the second time hid a behavioural bug: the Ctrl-C check went in as a
+   raw ETX byte, collapsed to an empty string, and could never fire. (The first was a raw NUL in
+   `coverage.ts` — the identical defect `ce2d34c` fixed in `matchups.ts`.)
+
+Also verified rather than assumed: cutting stdin mid-ritual leaves every tag typed so far in the
+database and the session row honestly open (`closed_at` and `tilt` NULL).
+
+NOT DONE, and it is the first thing next session: **none of this has touched his real cache.**
+`lol cerrar`, `lol cobertura` and the two new hypotheses need to be run on his machine, and
+`team_state_dominates` / `growth_drift` still need REGISTERING — the code is there, the
+registration is a dated act that has to happen where the games are.
 
 Open questions:
-- **A3 still undecided and it blocks a third hypothesis.** `teamGoldDiff` contains his own lane
-  pair (r=0.65 with laneGoldDiff; net of the pair his teammates are +605 vs +47), so
-  `team_state_dominates` was deliberately NOT registered — freezing a spec on a variable we
-  intend to change would make the hash refuse to evaluate after the fix, costing the clock we
-  just started. Decide `restOfTeamGoldDiff` before M2 builds `state_curve`, then register it.
-- **Diana may be moot**: last Diana game 2026-08-10, zero in the last 8. `roadmap.md` §3.1's
-  question may already be answered by his behaviour. `diana_needs_a_lead` may never reach n=25.
-- No MCP tool reads the ledger yet — it is reachable only via `scripts/register-hypotheses.ts`
-  and `scripts/evaluate-hypotheses.ts`. Deliberate: the registered `riot` server predates
-  today's tools anyway and needs a Claude Code restart to see new ones.
+- **Registering the two new hypotheses is pending and time-sensitive in the same way §1 was.**
+  Both need their arbitrary knobs swept at registration (G-011): band and teamBand for the team
+  state, the rolling window for the drift.
+- **Diana**: closed by D3 as "the ledger decides", with the caveat that it may never reach n.
 - Still unverified and believed on trust: ADR-008's ward-position claim (basis of a permanent
-  scope cut), the S1 step-4 op.gg cross-check (no record it ever ran), the "+500-1500 small
-  leads 4/8 vs 5/7" line, the individual `contamination` labels.
-- ~~No git remote~~ **RESOLVED 2026-08-16**: pushed to https://github.com/MarcosNovella/lol-project
-  (public, master, verified reachable unauthenticated; `.env` absent, only `.env.example`).
-  Six commits from this session. **The VAULT is a different repo and stays local — it holds
-  `10-salud` and `20-finanzas`. It is committed locally and must never be pushed without a
-  separate, explicit instruction.**
-- Still single-machine: `vault/_raw/` is gitignored, so `matchup-record.csv` is not versioned,
-  and `riot-mcp/data/` (the SQLite cache) is gitignored too. Both are regenerable — the CSV from
-  the cache, the cache from Riot — but match-v5 does not serve history indefinitely. Worth
-  either backing up `data/` or un-ignoring `_raw/lol/*.csv`. Marcos's call.
-- Repo still named `riot-mcp` locally while GitHub calls it `lol-project`; the rename to
-  `lol-lab` is still deferred (path wired into `~/.claude.json`).
-- `git config user.name` is unset, so every commit is authored by `unknown <email>`. One line
-  to fix if he wants his name on a public repo.
-- One historical revision (`688c21c`) holds `matchups.ts` as a BINARY blob, from the NUL byte
-  fixed in `ce2d34c`. HEAD is clean text; only that one diff renders as binary. Cosmetic, and
-  now pushed, so cleaning it would mean a force-push.
-- Dev key expires ~14:00 today (pasted 2026-08-16 14:08). Personal key still not arrived.
-- Rename `riot-mcp` → `lol-lab`: deferred to end of week (path wired into `~/.claude.json`).
+  scope cut), the "+500-1500 small leads 4/8 vs 5/7" line, the individual `contamination` labels.
+- `data/` is still gitignored and single-machine, and it now costs more than it did: a cloud
+  session cannot check a single number. A derived, versionable export is the cheap fix; whether
+  it gets committed is his call.
+- `git config user.name` is unset ON HIS MACHINE, so his commits are authored by `unknown`. The
+  commits from this session are authored by Claude, which is accurate.
+- `package.json` declares `engines: >=24`; the cloud container runs Node **22.22**, where
+  `node:sqlite` and type-stripping both work unflagged and the whole suite passes. Left declared
+  at 24 — that is the supported runtime and the README says so — but 22 is now known to work.
+- One historical revision (`688c21c`) holds `matchups.ts` as a BINARY blob. Cosmetic, and
+  cleaning it would mean a force-push on a public repo.
+- Repo still named `riot-mcp` locally while GitHub calls it `lol-project`; rename to `lol-lab`
+  still deferred (path wired into `~/.claude.json`).
+- **The VAULT is a different repo and stays local** — it holds `10-salud` and `20-finanzas` and
+  must never be pushed without a separate, explicit instruction.

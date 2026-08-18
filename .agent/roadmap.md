@@ -38,10 +38,12 @@ Locke goes 3/7 in those same states. Diana's problem is not conversion, it is th
 produces nothing when the state is not handed to her — which is a different, more actionable
 claim and lands squarely on the plan's "the leak is the even game".
 
-**A3. `teamGoldDiff` contains his own lane pair**, so "team state" and "lane state" are not
-independent: r = 0.65, and net of the lane pair his teammates are +605 when he wins lane vs
-+47 when he loses it. The 12/15 vs 2/5 split stays valid (it compares within lane-ahead), but
-the variable should become `restOfTeamGoldDiff` BEFORE M2 builds `state_curve` on it.
+**A3. ~~`teamGoldDiff` contains his own lane pair~~ — DONE 2026-08-18.** r = 0.65, so "team
+state" and "lane state" were not independent. `LaneState.restOfTeamGoldDiff` now removes the
+pair; `teamGoldDiff` stays because it has consumers. `TeamStateSpec` freezes both bands and
+`team_state_dominates` is finally registerable — **it still has to be REGISTERED, on his
+machine, with both bands swept**. Note the remaining gold is not exogenous either: a mid who
+converts a lead by roaming makes his teammates richer, so this is less contaminated, not clean.
 
 **A4. `conversionIsRobust` blesses a gap of exactly zero** — `Math.sign(0)` is 0 and `{0}` has
 size 1, so it returns `true` for "no difference at all". `tests/conversion.test.ts:57-67` pins
@@ -132,11 +134,11 @@ Tables and parsers, all derived-immutable like the matches themselves:
   ITEM_PURCHASED has 128 rows with `participantId: 0` out of 15920 (pre-game); handle it.
 - `roams` — per-minute position by lane zone, and what happened to his own wave meanwhile.
 
-**M3 — pure lib + CLI + per-match report**
-Extract analysis to `src/lib/` (no I/O), keep `server.ts` as the MCP front-end, add
-`src/cli.ts` for the rituals. The headline deliverable: per game, the 3 most expensive
-moments with exact minute, so he can open the replay at that timestamp. Replays are local
-`.rofl` and break on patch change, so the report is only useful within the week.
+**M3 — DONE 2026-08-18.** `src/cli.ts` dispatches cerrar · report · prep · cobertura · growth ·
+page · hip · rank over the analysis layer, which was already pure and stayed where it is —
+`src/lib/` was never needed, `src/analysis/` already is that library. The ritual scripts are
+retired; `scripts/` keeps smoke, call, register-hypotheses and export-matchup-record. The
+headline deliverable (3 expensive moments with the exact minute) ships inside `lol cerrar`.
 
 **M4 — account handling + season growth curve + matchups** (HARD REQUIREMENT before the
 main's first ranked game)
@@ -184,16 +186,18 @@ page for the gold curve and death map) only if Marcos asks.
 
 ## 3. Needs Marcos in the room
 
-1. **Diana.** 43% win rate (6/14), 39% of his games. *(Question restated 2026-08-16 S4 — the
-   old framing "converts a lead worst (6/9)" is one game from Locke's 8/11 and is not a
-   finding; see §0/A2.)* The real number: **Diana 0/5 from even-or-behind, all 6 wins from
-   already being ahead**, against Locke's 3/7 in those states. So the question to put to him
-   is not "does she convert" but: during a climb whose whole point is consistency, does a
-   champion that produces nothing from a neutral start belong in the main's pool? His call,
-   not the software's — but it should be put to him with these numbers, not the old ones.
-2. **Day 1 of the main.** What does he actually get told before and after his first ranked
-   games? The peer-relative benchmark works from game 1 (needs no history), matchup priors do
-   not. Needs a decided ritual, not an assumption.
+1. ~~**Diana.**~~ **ASKED AND ANSWERED 2026-08-18.** Put to him with the real numbers (0/5 from
+   even-or-behind, all 6 wins from already being ahead, against Locke's 3/7 in those states).
+   His call: **decide with data, not now.** Which needs nothing built — `diana_needs_a_lead` is
+   already registered at n=5 of 25. The honest caveat, recorded: he has not played her in 8
+   games, so it may never reach n, and "his behaviour already answered" stays the likely
+   outcome. Do not re-litigate this without new games.
+2. **Day 1 of the main.** PARTLY ANSWERED — the ritual is decided (`lol cerrar`, ADR-016) and
+   `lol cobertura` now states exactly what the engine cannot say yet. What is NOT settled is
+   the before-the-game half: he chose only the post-session moment, so nothing speaks to him
+   before his first ranked game. Worth re-raising once the main actually starts, with the
+   evidence of whether he misses it. Note G-019 was born from precisely the main's day-1 state:
+   no record and no prior.
 3. ~~**The op.gg cross-check from S1 step 4 was never confirmed to have run.**~~ **DONE
    2026-08-16, and it PASSES.** All 8 champion totals reconcile exactly against
    `opgg-champion-pool-2026-08-14.csv`, and all 20 games in `opgg-matches-2026-08-14.csv` match
@@ -203,9 +207,11 @@ page for the gold curve and death map) only if Marcos asks.
    keeps them (Diana had 2 one-minute remakes, Senna 1, and Senna's counted as a WIN, which is
    exactly the kind of row that inflates a rate); (c) the cache was missing 6 flex games, now
    backfilled — smurf ranked history is complete at 69 (51 soloq + 18 flex).
-4. **The vault write path is undesigned.** Which frontmatter keys the engine may touch, and
-   how vault rule 2 (contradiction is never overwritten, it is surfaced) is honoured
-   mechanically. Do not write to the vault before this is agreed.
+4. ~~**The vault write path is undesigned.**~~ **SETTLED 2026-08-18 (ADR-017): there is no write
+   path.** The engine writes CSV to `_raw/lol/` and never markdown. Honouring vault rule 2 from
+   outside the vault would mean designing a merge policy, a touchable-key set and a conflict
+   surface — all to automate a paste. Refusing the write makes the rule unbreakable instead of
+   enforced.
 5. **The rename** `riot-mcp` -> `lol-lab`, deferred deliberately. End of week, one line in
    `~/.claude.json`, done when nothing is mid-flight.
 6. **The personal API key** still has not arrived. The dev key expires every 24h, which is
