@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { tagGame, tagOf } from '../src/analysis/capture.ts';
 import { flattenMatch } from '../src/analysis/flatten.ts';
 import { type Db, openDb } from '../src/store/db.ts';
-import { finishSyncLog, saveMatch, startSyncLog, upsertAccount } from '../src/store/matches.ts';
+import {
+  finishSyncLog,
+  saveMatch,
+  saveTimeline,
+  startSyncLog,
+  upsertAccount,
+} from '../src/store/matches.ts';
 import { CLIENT_SCRIPT } from '../src/ui/page.ts';
 import {
   abrirSesion,
@@ -12,6 +18,7 @@ import {
   graficos,
   ledger,
   momentos,
+  olvidarMapa,
   pendientes,
   prep,
   RouteError,
@@ -405,5 +412,66 @@ describe('las vistas de lectura', () => {
     // No record and no prior: the honest answer is that there is nothing to say, and it must not
     // come out as `mayormente_propio` the way it did before G-019.
     expect(p.confianza).toBe('sin_datos');
+  });
+});
+
+describe('la memoización del mapa de muertes', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    olvidarMapa();
+    upsertAccount(db, {
+      puuid: 'smurf-puuid',
+      gameName: 'LegendofTorcuato',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+  });
+
+  it('serves the same answer twice without recomputing', () => {
+    seedGame(db, 'LA2_A', CREATION);
+    const primera = graficos(db, 'smurf');
+    const segunda = graficos(db, 'smurf');
+    // Identity, not equality: the second call returned the memo rather than an equal object.
+    expect(segunda).toBe(primera);
+  });
+
+  it('invalidates when a game arrives — the half that actually matters', () => {
+    seedGame(db, 'LA2_A', CREATION);
+    const antes = graficos(db, 'smurf');
+    expect(antes.partidas).toBe(0); // no timeline yet, so nothing derivable
+
+    seedGame(db, 'LA2_B', CREATION + HOUR);
+    const despues = graficos(db, 'smurf');
+    // A cache that does not invalidate is worse than no cache: it would keep answering with a
+    // map that silently predates the games he just played.
+    expect(despues).not.toBe(antes);
+  });
+
+  it('invalidates on a TIMELINE BACKFILL, which changes no game and no id', () => {
+    seedGame(db, 'LA2_A', CREATION);
+    const antes = graficos(db, 'smurf');
+    expect(antes.partidas).toBe(0);
+
+    // The trap this test exists for: backfilling adds deaths to a game already in the cache
+    // without touching the game count or the newest id. A key built from those two alone would
+    // serve a stale map forever after exactly the operation that produced the timelines.
+    saveTimeline(db, 'LA2_A', {
+      metadata: { matchId: 'LA2_A', participants: ['smurf-puuid', 'LA2_A-enemy'] },
+      info: {
+        frameInterval: 60_000,
+        participants: [
+          { participantId: 1, puuid: 'smurf-puuid' },
+          { participantId: 2, puuid: 'LA2_A-enemy' },
+        ],
+        frames: [{ timestamp: 0, participantFrames: {}, events: [] }],
+      },
+    });
+
+    const despues = graficos(db, 'smurf');
+    expect(despues).not.toBe(antes);
+    expect(despues.partidas).toBe(1);
   });
 });

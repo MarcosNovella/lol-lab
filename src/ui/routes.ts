@@ -342,6 +342,9 @@ export async function sincronizar(
         /* the clock simply does not advance today */
       }
     }
+    // New games mean a new map. Dropped here rather than left to expire, so the page redrawing
+    // after a sync shows the games that sync just brought in.
+    olvidarMapa();
     emit({
       tipo: 'fin',
       bajadas: result.fetched,
@@ -426,19 +429,61 @@ export function momentos(db: Db, cuenta: string, limite = 5): MomentoPartida[] {
   return out;
 }
 
-/** The two things text does badly (ADR-007), rendered by the SVG builders that already exist. */
-export function graficos(
-  db: Db,
-  cuenta: string,
-  limite = 10,
-): {
+export type Graficos = {
   curva: string | null;
   mapa: string;
   muertes: number;
   propiaMitad: number;
   partidas: number;
-} {
+};
+
+/**
+ * Memoised, because the death map reads EVERY cached game.
+ *
+ * Measured before adding this, over 70 seeded games with 6.4 MB of timelines: 40 ms per call,
+ * against 1 ms for the status panel and 6 ms for the moments. His real timelines are roughly
+ * thirty times larger per game, which puts a real page load near 1.2 s of a single-threaded
+ * server doing nothing else. Not the catastrophe it looked like from reading the code, and still
+ * worth removing: it is paid on every load and again after every sync.
+ *
+ * Safe to cache at all because finished games are immutable (ADR-004), so the answer only
+ * changes when the cache gains something.
+ */
+let mapaCache: { clave: string; valor: Graficos } | null = null;
+
+/**
+ * What has to change for the drawing to change.
+ *
+ * Three parts, and the third is the one that is easy to forget: a timeline BACKFILL adds deaths
+ * to games that are already in the cache without touching the game count or the newest id, so a
+ * key built from those two alone would serve a stale map forever after a backfill — which is
+ * exactly the operation that produced the timelines in the first place.
+ */
+function claveDelMapa(db: Db, puuid: string): string {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS partidas,
+              COALESCE(MAX(m.game_creation), 0) AS ultima,
+              SUM(CASE WHEN t.match_id IS NULL THEN 0 ELSE 1 END) AS timelines
+         FROM participants p
+         JOIN matches m ON m.match_id = p.match_id
+         LEFT JOIN timelines t ON t.match_id = p.match_id
+        WHERE p.puuid = ?`,
+    )
+    .get(puuid) as Record<string, unknown>;
+  return [puuid, row['partidas'], row['ultima'], row['timelines']].join('|');
+}
+
+/** Drops the memo. Called after a sync, so the page does not have to know the cache exists. */
+export function olvidarMapa(): void {
+  mapaCache = null;
+}
+
+/** The two things text does badly (ADR-007), rendered by the SVG builders that already exist. */
+export function graficos(db: Db, cuenta: string, limite = 10): Graficos {
   const { puuid } = cuentaDe(db, cuenta);
+  const clave = claveDelMapa(db, puuid);
+  if (mapaCache !== null && mapaCache.clave === clave) return mapaCache.valor;
   const recientes = queryParticipants(db, { puuid, role: 'MIDDLE', queueId: 420, limit: limite });
   const todas = queryParticipants(db, { puuid, role: 'MIDDLE', queueId: 420 });
 
@@ -476,13 +521,15 @@ export function graficos(
     }
   }
 
-  return {
+  const valor: Graficos = {
     curva,
     mapa: deathMapSvg(dots),
     muertes: dots.length,
     propiaMitad: dots.filter((d) => isOwnHalf(d.position, d.teamId)).length,
     partidas: conTimeline,
   };
+  mapaCache = { clave, valor };
+  return valor;
 }
 
 export function cobertura(
