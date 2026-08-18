@@ -304,6 +304,40 @@ el botón y deja la UI viva.
 
 verify verde, 217 → 248 tests. `pnpm smoke` verde con 14 tools.
 
+SESSION 2026-08-18 (S7) — **la UI vista y endurecida para su máquina.** Marcos dijo estar en su
+PC y pidió levantarla. **Esta sesión sigue en el contenedor de la nube** — verificado, no supuesto
+— así que no se puede: un servidor acá escucha en el 127.0.0.1 del contenedor. Lo que sí se hizo
+fue abrirla con el Chromium headless que ya está instalado y mandarle capturas.
+
+Sembrar 70 partidas con timelines completos (6.4 MB) en vez de 4 cambió todo: **los tres defectos
+de esta tanda sólo aparecen con datos y con una pantalla.**
+
+1. **`/api/graficos` tardaba 40 ms** con 6.4 MB de timelines, recorriendo TODAS las partidas en
+   cada carga. Advertí "cientos de MB bloqueando el servidor" leyendo el código y **la medición
+   dice menos que eso**: ~1,2 s extrapolado a sus timelines reales (~30x más grandes). Memoizado
+   → 0 ms. La clave de invalidación incluye la cuenta de TIMELINES, porque un backfill agrega
+   muertes sin cambiar ni la cantidad de partidas ni la más reciente.
+2. **El mapa de muertes salía NEGRO ENTERO.** Reusé `deathMapSvg` pero no su CSS, que vivía sólo
+   en el `<style>` de la página estática. Los SVG emiten clases y no traen presentación, así que
+   todos los rellenos cayeron al default del navegador: 188 muertes contadas, cero dibujadas, con
+   tsc, Biome y Vitest en verde. **G-023**, y ahora un test deriva las clases de un dibujo real y
+   exige que cada una tenga regla en las DOS superficies.
+3. **La lista de tagueo era un muro de 70 tarjetas.** Partida en "de la sesión" (12 h) y "atrasadas"
+   plegadas — por layout, pero sobre todo porque taguear algo de hace dos semanas es memoria y no
+   observación, que es justo lo que ADR-015 separó.
+
+Además, para que la primera corrida en Windows no choque contra algo que no puedo probar:
+fallback de puerto 4477→4485 (verificado peleando dos servidores por el mismo puerto), la URL
+citada para `cmd /c start`, preflight que avisa y no bloquea, y `lol-ui.bat` con `pause` ante
+error para que el mensaje no desaparezca. `.gitattributes` le da CRLF al `.bat`.
+
+verify verde, 248 → 256 tests.
+
+**PENDIENTE Y ES SUYO**: nada de esto corrió contra su caché real todavía. En su PC: `git pull`,
+`pnpm install`, doble click. Lo que hay que mirar ahí y no se puede desde acá: que abra el
+navegador solo, que el panel liste sus dos cuentas, **cuánto tarda la sección de curva y mapa**, y
+un sync real con la barra.
+
 Open questions:
 - **Registering the two new hypotheses is pending and time-sensitive in the same way §1 was.**
   Both need their arbitrary knobs swept at registration (G-011): band and teamBand for the team

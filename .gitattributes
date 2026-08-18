@@ -1,2 +1,6 @@
 * text=auto eol=lf
 *.db binary
+
+# A .bat is read by cmd.exe, which wants CRLF. The rest of the repo is LF (G-010), so this is
+# the one file that has to opt out of it.
+*.bat text eol=crlf

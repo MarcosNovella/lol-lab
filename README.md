@@ -52,11 +52,8 @@ Para dejar de rotarla, pedí una **Personal API Key** en el mismo portal
 
 ## El ritual
 
-Cuando terminás de jugar:
-
-```bash
-pnpm lol ui
-```
+Cuando terminás de jugar, **doble click a `lol-ui.bat`** (hacele un acceso directo en el
+escritorio la primera vez). Desde la terminal es `pnpm lol ui`.
 
 Abre el panel en el navegador y a partir de ahí no volvés a la terminal. Arriba te dice **qué
 hacer ahora** y por qué; abajo están el botón de sincronizar con su barra de progreso, las
@@ -68,7 +65,12 @@ El **tag** es lo único que el software no puede sacar solo, y es lo que separa 
 marcaste queda. Una partida sin taguear no se puede taguear en noviembre.
 
 El servidor escucha solo en `127.0.0.1` y la URL lleva un token que cambia en cada arranque, así
-que guardar el favorito no sirve. Ctrl-C lo apaga.
+que guardar el favorito no sirve. **Mientras la ventana negra esté abierta, el panel funciona**;
+cerrarla lo apaga. Si el puerto 4477 está ocupado se corre solo al siguiente y te lo dice.
+
+La primera vez vas a ver tus partidas viejas sin taguear todas juntas: la lista muestra las de
+las últimas 12 horas y deja el resto plegado. Taguear una partida de hace dos semanas es
+acordarse, no observar — el software anota cuánto tardaste, así que no se mezclan.
 
 Si preferís la terminal, `pnpm lol cerrar` hace el mismo ritual con una tecla por partida
 (`y` la produje yo · `i` salía igual · `p` estuvo pareja). `pnpm lol` solo lista todo lo demás:
