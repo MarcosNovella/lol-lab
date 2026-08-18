@@ -2,12 +2,15 @@ import type { Db } from '../store/db.ts';
 import { getRawMatch, getRawTimeline, queryParticipants } from '../store/matches.ts';
 import { collectStates, type StateRow } from './conversion.ts';
 import { eventsOfType, participantsOf } from './events.ts';
+import { drift, growthCurve } from './growth.ts';
 import {
   type AnalysisSpec,
+  type GrowthSpec,
   LedgerError,
   type Measure,
   type Measurement,
   type Spec,
+  type TeamStateSpec,
   type VisionSpec,
   type Window,
 } from './hypotheses.ts';
@@ -175,10 +178,82 @@ function wardBeforeObjective(db: Db, spec: VisionSpec, window: Window): Measurem
   return { n, effect: wardedTaken / wardedTotal - bareTaken / bareTotal };
 }
 
+/**
+ * Among the games he is AHEAD in lane, his win rate when the rest of his team is ahead minus
+ * his win rate when the rest of his team is behind.
+ *
+ * The variable is `restOfTeamGoldDiff`, his own lane pair removed. `teamGoldDiff` correlates
+ * with `goldDiff` at r = 0.65, so the earlier version of this comparison put part of his own
+ * lane state on both sides of the question (roadmap §0/A3).
+ *
+ * What it still does NOT settle: the remaining gold is not exogenous either. A mid who converts
+ * a lead by roaming makes his teammates richer, so "team ahead" partly measures him. This
+ * measures whether the two states go with different results; it does not say which causes which,
+ * and the caveat on the row has to say so.
+ *
+ * Centred at 0 — it is a difference of two rates, so the null is no difference, not 0.5.
+ */
+function teamStateGivenLane(db: Db, spec: TeamStateSpec, window: Window): Measurement {
+  const { rows } = collectStates(db, {
+    puuid: spec.puuid,
+    role: spec.role,
+    queueId: spec.queueId,
+    since: window.from,
+    ...(Number.isFinite(window.until) ? { until: window.until } : {}),
+    minute: spec.minute,
+  });
+
+  const laneAhead = rows.filter((r) => r.goldDiff > spec.band);
+  const teamAhead = laneAhead.filter((r) => r.restOfTeamGoldDiff > spec.teamBand);
+  const teamBehind = laneAhead.filter((r) => r.restOfTeamGoldDiff < -spec.teamBand);
+
+  const n = teamAhead.length + teamBehind.length;
+  if (teamAhead.length === 0 || teamBehind.length === 0) return { n, effect: Number.NaN };
+  return {
+    n,
+    effect:
+      teamAhead.filter((r) => r.win).length / teamAhead.length -
+      teamBehind.filter((r) => r.win).length / teamBehind.length,
+  };
+}
+
+/**
+ * Drift of the GAP between his rolling mean and his lane opponents', per game.
+ *
+ * The gap rather than his own line, because his own line moves with lobby strength and says
+ * nothing on its own: a curve that falls while his opponents' falls faster is improvement. That
+ * is the whole argument of ADR-012, applied to a number instead of to a drawing.
+ *
+ * `n` is games, and the honest reading is that it needs a lot of them: a rolling mean is
+ * endpoint-sensitive, so the first reading off this curve (−0.147 CS@10 per game over 39 games)
+ * is a description of two endpoints, not a finding. That is exactly why it is going into the
+ * ledger rather than into a report.
+ */
+function growthDrift(db: Db, spec: GrowthSpec, window: Window): Measurement {
+  const curve = growthCurve(db, {
+    puuid: spec.puuid,
+    accountLabel: spec.puuid,
+    metricKey: spec.metricKey,
+    role: spec.role,
+    queueId: spec.queueId,
+    window: spec.rollingGames,
+    since: window.from,
+    ...(Number.isFinite(window.until) ? { until: window.until } : {}),
+  });
+  // Two points cannot describe a drift, and one game certainly cannot. `drift` already returns
+  // NaN below two, which the ledger reads as "not measurable" rather than as zero (G-014).
+  const mine = drift(curve.points, (p) => p.mineRolling);
+  const theirs = drift(curve.points, (p) => p.theirsRolling);
+  return { n: curve.points.length, effect: mine - theirs };
+}
+
 export function standardMeasure(db: Db): Measure {
   return (spec: Spec, window: Window): Measurement => {
-    // A vision spec carries a field a lane-state spec does not, which is what tells them apart.
+    // Each shape is told apart by a field only it carries. Checked before the lane-state path,
+    // which is the one with the most fields and would otherwise swallow the others.
     if ('windowSeconds' in spec) return wardBeforeObjective(db, spec, window);
+    if ('teamBand' in spec) return teamStateGivenLane(db, spec, window);
+    if ('rollingGames' in spec) return growthDrift(db, spec, window);
     if (spec.stratum === 'none' && spec.outcome === 'binary_win') {
       return conversionGapBinary(rowsFor(db, spec, window, spec.minute), spec.band);
     }
@@ -205,13 +280,26 @@ export function countGapGames(db: Db, spec: Spec, baselineUntil: number, testFro
   // A vision spec has no lane state to read, so the unit is the GAME. Sending it through the
   // lane-state path silently returned 0 — `spec.champion` is undefined there, which matches no
   // row — and a declared hole that reports itself as empty is worse than no hole at all.
-  if ('windowSeconds' in spec) {
+  // A vision or growth spec has no lane state to read, so the unit is the GAME.
+  if ('windowSeconds' in spec || 'rollingGames' in spec) {
     return queryParticipants(db, {
       puuid: spec.puuid,
       role: spec.role,
       queueId: spec.queueId,
       since: baselineUntil,
     }).filter((r) => r.gameCreation >= baselineUntil && r.gameCreation < testFrom).length;
+  }
+  // A team-state spec DOES read a lane state, and the hole must be counted in the same unit the
+  // measure uses, so it goes through `collectStates` exactly as the lane-state path does.
+  if ('teamBand' in spec) {
+    return collectStates(db, {
+      puuid: spec.puuid,
+      role: spec.role,
+      queueId: spec.queueId,
+      since: baselineUntil,
+      until: testFrom,
+      minute: spec.minute,
+    }).rows.length;
   }
   return rowsFor(db, spec, { from: baselineUntil, until: testFrom }, spec.minute).length;
 }

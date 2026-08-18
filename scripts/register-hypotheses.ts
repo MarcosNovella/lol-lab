@@ -147,11 +147,21 @@ for (const [id, spec] of Object.entries(SPECS)) {
   // Describe whichever shape the spec is. Reading lane-state fields off a vision spec printed
   // "minute undefined band undefined" and tsc had already said so -- Node strips types without
   // checking them, so the script ran anyway.
-  const describeSpec = (s: Spec): string =>
-    'windowSeconds' in s
-      ? `ventana ${s.windowSeconds}s  ${s.role}/${s.queueId}  solo-sin-crédito=${s.onlyUncredited}`
-      : `minuto ${s.minute} banda ${s.band}  ${s.role}/${s.queueId}  outcome=${s.outcome} ` +
-        `stratum=${s.stratum} champion=${s.champion ?? 'any'}`;
+  const describeSpec = (s: Spec): string => {
+    if ('windowSeconds' in s) {
+      return `ventana ${s.windowSeconds}s  ${s.role}/${s.queueId}  solo-sin-crédito=${s.onlyUncredited}`;
+    }
+    if ('teamBand' in s) {
+      return `minuto ${s.minute} banda ${s.band} banda-equipo ${s.teamBand}  ${s.role}/${s.queueId}`;
+    }
+    if ('rollingGames' in s) {
+      return `métrica ${s.metricKey} ventana ${s.rollingGames} partidas  ${s.role}/${s.queueId}`;
+    }
+    return (
+      `minuto ${s.minute} banda ${s.band}  ${s.role}/${s.queueId}  outcome=${s.outcome} ` +
+      `stratum=${s.stratum} champion=${s.champion ?? 'any'}`
+    );
+  };
   out(
     `+ ${saved.id}\n` +
       `    spec      ${saved.specHash}  ${describeSpec(spec)}\n` +

@@ -71,6 +71,14 @@ export type GrowthOptions = {
   role?: Role;
   queueId?: number;
   window?: number;
+  /** Epoch ms floor on `gameCreation`, inclusive. */
+  since?: number;
+  /** Epoch ms ceiling on `gameCreation`, EXCLUSIVE — so [a, b) and [b, ∞) partition the history
+   *  with no game landing on both sides, the same convention `collectStates` uses. Windowing
+   *  matters here because the ledger measures a baseline and an out-of-sample stretch with the
+   *  same function, and a rolling mean that quietly spanned both would carry the baseline into
+   *  the test. */
+  until?: number;
 };
 
 /**
@@ -92,11 +100,15 @@ export function growthCurve(db: Db, options: GrowthOptions): GrowthCurve {
   }
 
   const window = options.window ?? DEFAULT_WINDOW;
+  const until = options.until;
   const mine = queryParticipants(db, {
     puuid: options.puuid,
     ...(options.role !== undefined ? { role: options.role } : {}),
     ...(options.queueId !== undefined ? { queueId: options.queueId } : {}),
-  }).sort((a, b) => a.gameCreation - b.gameCreation);
+    ...(options.since !== undefined ? { since: options.since } : {}),
+  })
+    .filter((r) => until === undefined || r.gameCreation < until)
+    .sort((a, b) => a.gameCreation - b.gameCreation);
 
   const mineValues: number[] = [];
   const theirValues: number[] = [];

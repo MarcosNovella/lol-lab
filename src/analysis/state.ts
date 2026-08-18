@@ -46,6 +46,19 @@ export type LaneState = {
   csDiff: number;
   /** His team's total gold minus the enemy team's, at the same frame. */
   teamGoldDiff: number;
+  /**
+   * The same difference with HIS OWN LANE PAIR removed — his eight teammates-and-enemies
+   * excluding him and his direct opponent.
+   *
+   * Exists because `teamGoldDiff` contains him: it correlates with `goldDiff` at r = 0.65 over
+   * the 36-game corpus, so "lane state" and "team state" are not two independent variables and
+   * a hypothesis that crosses them is partly comparing a number with itself (roadmap §0/A3).
+   *
+   * It is LESS contaminated, not clean. Removing the pair does not make it exogenous — a mid
+   * who roams generates gold in other lanes, so his own play is still in here, just not
+   * arithmetically. Anything built on it inherits that caveat.
+   */
+  restOfTeamGoldDiff: number;
   opponentPuuid: string;
   opponentChampion: string;
   bucket: StateBucket;
@@ -151,6 +164,11 @@ export function laneStateAt(
     xpDiff: (mine.xp ?? 0) - (theirs.xp ?? 0),
     csDiff: csOf(frame, myId) - csOf(frame, oppId),
     teamGoldDiff: myTeamGold - enemyTeamGold,
+    // Written as the two team totals net of the pair rather than as `teamGoldDiff - goldDiff`,
+    // which is the same number: the point of the field is WHO is counted, and the subtraction
+    // form says it where the shortcut hides it.
+    restOfTeamGoldDiff:
+      myTeamGold - (mine.totalGold ?? 0) - (enemyTeamGold - (theirs.totalGold ?? 0)),
     opponentPuuid: opponent.puuid,
     opponentChampion: opponent.championName,
     bucket: bucketOf(goldDiff),

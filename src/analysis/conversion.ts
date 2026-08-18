@@ -35,6 +35,8 @@ export type StateRow = {
   xpDiff: number;
   csDiff: number;
   teamGoldDiff: number;
+  /** Team gold difference net of his own lane pair. See `LaneState.restOfTeamGoldDiff`. */
+  restOfTeamGoldDiff: number;
 };
 
 export type CollectOptions = {
@@ -92,6 +94,7 @@ export function collectStates(db: Db, options: CollectOptions): CollectResult {
       xpDiff: state.xpDiff,
       csDiff: state.csDiff,
       teamGoldDiff: state.teamGoldDiff,
+      restOfTeamGoldDiff: state.restOfTeamGoldDiff,
     });
   }
 

@@ -17,6 +17,7 @@ function row(goldDiff: number, win: boolean): StateRow {
     xpDiff: 0,
     csDiff: 0,
     teamGoldDiff: 0,
+    restOfTeamGoldDiff: 0,
   };
 }
 

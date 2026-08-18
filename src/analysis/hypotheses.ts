@@ -66,7 +66,47 @@ export type VisionSpec = {
   onlyUncredited: boolean;
 };
 
-export type Spec = AnalysisSpec | VisionSpec;
+/**
+ * A hypothesis about TEAM state given lane state — a third shape, and the reason `A3` had to be
+ * settled first.
+ *
+ * It carries two bands because it cuts on two axes: `band` decides which games count as "ahead
+ * in lane", `teamBand` decides which team states count as ahead or behind. Both are arbitrary,
+ * so both are frozen here and both are swept at registration (G-011). The earlier version of
+ * this question cut on `teamGoldDiff`, which contains his own lane pair — freezing a spec on a
+ * variable we already intended to replace would have made the hash refuse to evaluate after the
+ * fix, which is why it was deliberately NOT registered until now.
+ */
+export type TeamStateSpec = {
+  puuid: string;
+  role: Role;
+  queueId: number;
+  minute: number;
+  /** Band on his lane gold lead. */
+  band: number;
+  /** Band on the REST of the team's gold difference, his lane pair removed. */
+  teamBand: number;
+};
+
+/**
+ * A hypothesis about DRIFT — whether a causal metric moves over a season, net of the lobbies
+ * getting harder or easier.
+ *
+ * `rollingGames` is in the spec because a rolling mean is endpoint-sensitive: the same games
+ * under a window of 5 and of 20 give different drifts, so leaving the window free at evaluation
+ * time would hand back exactly the degree of freedom G-013 exists to remove. The metric key is
+ * frozen for the same reason, and `growthCurve` independently refuses any metric that is not
+ * `causal` (G-008).
+ */
+export type GrowthSpec = {
+  puuid: string;
+  role: Role;
+  queueId: number;
+  metricKey: string;
+  rollingGames: number;
+};
+
+export type Spec = AnalysisSpec | VisionSpec | TeamStateSpec | GrowthSpec;
 
 /**
  * Canonical JSON over the spec's OWN keys, sorted.
