@@ -37,8 +37,40 @@ for (const tool of tools) {
   const params = Object.keys(schema?.properties ?? {});
   process.stdout.write(`  ${tool.name.padEnd(22)} (${params.join(', ') || 'sin args'})\n`);
 }
-if (tools.length !== 7) {
-  process.stderr.write(`Se esperaban 7 tools, hay ${tools.length}\n`);
+/**
+ * The tools this server is supposed to expose, by NAME rather than by count.
+ *
+ * It used to assert `length !== 7` and had been silently wrong since `riot_backfill_timelines`
+ * was added: a count tells you the number changed, never which one went missing, and it goes
+ * stale the moment anyone adds a tool without touching this line. Naming them means a tool
+ * that disappears is reported by name, and a new one has to be declared here on purpose.
+ */
+const EXPECTED = [
+  'riot_key_status',
+  'riot_resolve_account',
+  'riot_sync',
+  'riot_backfill_timelines',
+  'riot_matches',
+  'riot_benchmark',
+  'riot_match_detail',
+  'riot_cache_status',
+  'lol_prep',
+  'lol_coverage',
+  'lol_hypotheses',
+  'lol_tags',
+  'lol_tag',
+  'lol_rank',
+];
+
+const found = new Set(tools.map((t) => t.name));
+const missing = EXPECTED.filter((name) => !found.has(name));
+const extra = [...found].filter((name) => !EXPECTED.includes(name));
+if (missing.length > 0) {
+  process.stderr.write(`Faltan tools: ${missing.join(', ')}\n`);
+  process.exitCode = 1;
+}
+if (extra.length > 0) {
+  process.stderr.write(`Tools sin declarar en el smoke: ${extra.join(', ')}\n`);
   process.exitCode = 1;
 }
 

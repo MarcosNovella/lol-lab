@@ -2,7 +2,23 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { benchmark, formatComparison, mostPlayedRole } from './analysis/benchmark.ts';
+import {
+  splitByTag,
+  TAGS,
+  type Tag,
+  tagGame,
+  taggedRows,
+  untaggedGames,
+} from './analysis/capture.ts';
+import { coverageOf, coverageTotals } from './analysis/coverage.ts';
+import { evaluateHypothesis, evaluationsOf, listHypotheses } from './analysis/hypotheses.ts';
+import { collectMatchups } from './analysis/matchups.ts';
+import { standardMeasure } from './analysis/measures.ts';
 import { normaliseRole, type Role, roleLabel } from './analysis/metrics.ts';
+import { sameChampion } from './analysis/names.ts';
+import { confidenceOf, prepMatchup } from './analysis/prep.ts';
+import { loadPriors, priorFor, priorsKeyedLike } from './analysis/priors.ts';
+import { describeRank, latestSnapshot, snapshotHistory, TRACKED_QUEUES } from './analysis/rank.ts';
 import { createClient } from './riot/client.ts';
 import { keyState } from './riot/key.ts';
 import { platformLabel } from './riot/routing.ts';
@@ -19,7 +35,16 @@ import {
 import { backfillTimelines, resolveAccount, syncMatches } from './sync.ts';
 
 /**
- * MCP server. Registers the seven tools and talks JSON-RPC over stdio.
+ * MCP server. Talks JSON-RPC over stdio.
+ *
+ * Two prefixes, and the split is meaningful rather than historical: `riot_*` tools touch the
+ * API and the cache — resolve, sync, backfill, what is downloaded — while `lol_*` tools ask the
+ * engine questions and never spend a request. The second group is the same library `src/cli.ts`
+ * drives (ADR-006, two front-ends over one pure analysis layer).
+ *
+ * WHAT BELONGS HERE AND WHAT DOES NOT: an MCP response is a chat turn, so these answer in
+ * summaries and point at the CLI for anything long. A forty-fight report does not fit in one and
+ * never will — that is `lol report`.
  *
  * G-001: stdout belongs to the protocol. Nothing here may `console.log` — Biome enforces it,
  * and any diagnostics go to stderr.
@@ -553,6 +578,249 @@ server.registerTool(
     }
     lines.push('', 'Por cola:');
     for (const q of stats.perQueue) lines.push(`  ${queueLabel(q.queueId)}: ${q.matches}`);
+    return text(lines.join('\n'));
+  },
+);
+
+// ------------------------------------------------------------------ the engine
+
+server.registerTool(
+  'lol_prep',
+  {
+    title: 'Preparar un matchup',
+    description:
+      'Qué sabés de un matchup antes de jugarlo: tu récord en ESA cuenta, tus reps en todas, ' +
+      'y el meta de op.gg — los tres por separado, con lo que la muestra permite afirmar.',
+    inputSchema: {
+      champion: z.string().describe('Tu campeón'),
+      opponent: z.string().describe('El campeón rival de tu línea'),
+      account: z.string().default('smurf').describe('Etiqueta o Riot ID de la cuenta'),
+    },
+  },
+  async ({ champion, opponent, account }) => {
+    const { puuid } = requireAccount(account);
+    const record = listAccounts(database()).find((a) => a.puuid === puuid);
+    const label = record?.label ?? record?.gameName ?? account;
+
+    const rows = collectMatchups(database());
+    // Resolve to the spellings the cache uses, so 'twisted fate' and 'TwistedFate' both work
+    // (G-016). A raw comparison here once produced a fabricated vault-discrepancy report.
+    const mine = rows.find((r) => sameChampion(r.champion, champion))?.champion ?? champion;
+    const theirs = rows.find((r) => sameChampion(r.opponent, opponent))?.opponent ?? opponent;
+
+    const prior = priorFor(loadPriors(), mine, theirs);
+    const prep = prepMatchup(rows, { champion: mine, opponent: theirs, account: label, prior });
+    const pct = (x: number): string => (Number.isFinite(x) ? `${(x * 100).toFixed(1)}%` : '—');
+
+    const lines = [
+      `${mine} vs ${theirs} — cuenta ${label}`,
+      `  reps totales (todas las cuentas): ${prep.repsTotal}`,
+      `  en esta cuenta: ${prep.own.wins}/${prep.own.games}`,
+    ];
+    for (const other of prep.otherAccounts) {
+      lines.push(
+        `  en ${other.account}: ${other.wins}/${other.games} — NO se suma, es rendimiento`,
+      );
+    }
+    lines.push(
+      prior === null
+        ? '  sin prior de op.gg'
+        : `  meta op.gg: ${pct(prior.winRate)} sobre ${prior.sampleGames} partidas`,
+    );
+    for (const e of prep.estimates) {
+      lines.push(`  estimado (peso ${e.weight}): ${pct(e.winRate)} · propio ${pct(e.ownWeight)}`);
+    }
+    lines.push(`  confianza: ${confidenceOf(prep)}`);
+    return text(lines.join('\n'));
+  },
+);
+
+server.registerTool(
+  'lol_coverage',
+  {
+    title: 'Qué no sé todavía',
+    description:
+      'Los matchups sobre los que el motor no puede decir nada, y cuántas partidas faltan ' +
+      'para que pueda. Las reps se suman entre cuentas, el récord no.',
+    inputSchema: {
+      account: z.string().default('smurf').describe('Etiqueta o Riot ID de la cuenta'),
+      limit: z.number().int().min(1).max(40).default(10).describe('Cuántas filas devolver'),
+    },
+  },
+  async ({ account, limit }) => {
+    const { puuid } = requireAccount(account);
+    const record = listAccounts(database()).find((a) => a.puuid === puuid);
+    const label = record?.label ?? record?.gameName ?? account;
+
+    const rows = collectMatchups(database());
+    const priors = priorsKeyedLike(
+      loadPriors(),
+      rows.map((r) => ({ champion: r.champion, opponent: r.opponent })),
+    );
+    const coverage = coverageOf(rows, { account: label, priors });
+    const totals = coverageTotals(rows, coverage);
+
+    const lines = [
+      `Cobertura — ${label}`,
+      `  alcance: cola ${coverage.scope.queue}, remakes ${coverage.scope.remakes}, ` +
+        `${coverage.scope.since === null ? 'toda la historia en caché' : 'ventana recortada'}`,
+      `  ${totals.matchups} matchups · ${totals.reps} reps · ${totals.silent} mudos`,
+      '',
+    ];
+    for (const row of coverage.rows.slice(0, limit)) {
+      lines.push(
+        `  ${row.champion} vs ${row.opponent}: ${row.ownGames} acá / ${row.reps} reps · ` +
+          `${row.confidence}` +
+          (row.gamesToNext === 0 ? '' : ` · faltan ${row.gamesToNext} para ${row.nextConfidence}`),
+      );
+    }
+    return text(lines.join('\n'));
+  },
+);
+
+server.registerTool(
+  'lol_hypotheses',
+  {
+    title: 'El ledger de hipótesis',
+    description:
+      'Qué está registrado como predicción fechada, con qué spec congelada y cómo va contra ' +
+      'las partidas posteriores. `insufficient_n` durante meses es la respuesta correcta.',
+    inputSchema: {
+      evaluate: z
+        .boolean()
+        .default(false)
+        .describe('Correr la evaluación y APPENDEARLA al ledger, además de leer'),
+    },
+  },
+  async ({ evaluate }) => {
+    const live = listHypotheses(database());
+    if (live.length === 0) return text('El ledger está vacío.');
+
+    const measure = evaluate ? standardMeasure(database()) : null;
+    const lines: string[] = [];
+    for (const h of live) {
+      lines.push(`${h.id} — ${h.claim}`);
+      lines.push(
+        `  spec ${h.specHash} · baseline ${h.baselineEffect.toFixed(3)} (n=${h.baselineN}) · ` +
+          `necesita n=${h.nNeeded} · ${h.gapGames} en el hueco declarado`,
+      );
+      lines.push(`  cautela: ${h.caveat}`);
+      if (measure !== null) {
+        // The spec is handed back explicitly so a drifted call site fails loudly (G-013).
+        const e = evaluateHypothesis(database(), h.id, h.spec, measure);
+        lines.push(
+          `  fuera de muestra: n=${e.n}, efecto ` +
+            `${Number.isFinite(e.effect) ? e.effect.toFixed(3) : 'no medible'} → ${e.verdict}`,
+        );
+      } else {
+        const last = evaluationsOf(database(), h.id)[0];
+        lines.push(
+          last === undefined
+            ? '  sin evaluar todavía'
+            : `  última evaluación: ${last.verdict}, n=${last.n}`,
+        );
+      }
+      lines.push('');
+    }
+    return text(lines.join('\n'));
+  },
+);
+
+server.registerTool(
+  'lol_tags',
+  {
+    title: 'Cómo se repartieron los resultados',
+    description:
+      'Las partidas tagueadas, separadas por a quién le atribuiste el resultado. Es un dato ' +
+      'REPORTADO: sirve para separar poblaciones de derrota, nunca para explicarlas, y no ' +
+      'existe el tag del rival contra el cual compararlo.',
+    inputSchema: {
+      account: z.string().default('smurf').describe('Etiqueta o Riot ID de la cuenta'),
+    },
+  },
+  async ({ account }) => {
+    const { puuid } = requireAccount(account);
+    const rows = taggedRows(database(), puuid);
+    const pending = untaggedGames(database(), puuid, { limit: 500 });
+    const split = splitByTag(rows, pending.length);
+
+    const lines = [
+      `Tags — ${account}: ${split.tagged} tagueadas, ${split.untagged} sin taguear`,
+      '',
+    ];
+    for (const p of split.populations) {
+      const lag = Number.isFinite(p.medianLagMs)
+        ? `${Math.round(p.medianLagMs / 60_000)} min de mediana desde el final de la partida`
+        : 'sin medir';
+      lines.push(`  ${p.tag}: ${p.wins}/${p.n} ganadas · ${lag}`);
+    }
+    lines.push('');
+    lines.push('Las no tagueadas NO se reparten entre las demás: si tagueás según cómo salió,');
+    lines.push('descartarlas en silencio haría que toda tasa de acá dependa de eso.');
+    return text(lines.join('\n'));
+  },
+);
+
+server.registerTool(
+  'lol_tag',
+  {
+    title: 'Taguear una partida',
+    description:
+      'Atribuye el resultado de una partida: mía / igual / pareja. Lo normal es hacerlo con ' +
+      '`lol cerrar` al terminar de jugar; esto existe para la noche que no lo corriste. ' +
+      'Guarda CUÁNDO lo tagueaste y te dice el atraso, porque un tag de tres días es memoria.',
+    inputSchema: {
+      matchId: z.string().describe('Id de la partida, como LA2_1234567890'),
+      tag: z.enum(['mía', 'igual', 'pareja']).describe('A quién le atribuís el resultado'),
+      account: z.string().default('smurf').describe('Etiqueta o Riot ID de la cuenta'),
+    },
+  },
+  async ({ matchId, tag, account }) => {
+    const { puuid } = requireAccount(account);
+    if (!TAGS.includes(tag as Tag)) throw new Error(`tag desconocido '${tag}'`);
+    const now = Date.now();
+    tagGame(database(), { matchId, puuid, tag: tag as Tag }, now);
+
+    const stored = taggedRows(database(), puuid).find((r) => r.matchId === matchId);
+    const lagMin = stored === undefined ? null : Math.round((now - stored.endedAt) / 60_000);
+    return text(
+      `${matchId} → ${tag}` +
+        (lagMin === null
+          ? ''
+          : `\nAtraso: ${lagMin} min desde que terminó la partida.` +
+            (lagMin > 12 * 60 ? ' Esto ya es memoria, no observación — queda anotado.' : '')),
+    );
+  },
+);
+
+server.registerTool(
+  'lol_rank',
+  {
+    title: 'El reloj de rango',
+    description:
+      'Dónde está cada cuenta y qué se registró desde que el reloj arrancó. La serie es tan ' +
+      'larga como la historia de haberla corrido: un rango no se reconstruye hacia atrás.',
+    inputSchema: {
+      account: z.string().default('smurf').describe('Etiqueta o Riot ID de la cuenta'),
+    },
+  },
+  async ({ account }) => {
+    const { puuid, label } = requireAccount(account);
+    const lines = [`Rango — ${label}`];
+    for (const queue of TRACKED_QUEUES) {
+      const latest = latestSnapshot(database(), puuid, queue);
+      if (latest === null) {
+        lines.push(`  ${queue}: sin registros`);
+        continue;
+      }
+      const history = snapshotHistory(database(), puuid, queue);
+      lines.push(
+        `  ${queue}: ${describeRank(latest)} (${latest.wins ?? 0}W-${latest.losses ?? 0}L) · ` +
+          `${history.length} cambio(s) registrado(s) desde ${localDate(
+            history[history.length - 1]?.observedAt ?? latest.observedAt,
+          )}`,
+      );
+    }
     return text(lines.join('\n'));
   },
 );
