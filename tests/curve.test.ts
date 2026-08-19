@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { biggestSwing, phaseSplit, stateCurve } from '../src/analysis/curve.ts';
+import {
+  biggestSwing,
+  type PhaseSplit,
+  phaseAverages,
+  phaseSplit,
+  stateCurve,
+} from '../src/analysis/curve.ts';
 import type { MatchDto, TimelineDto, TimelineEvent } from '../src/riot/types.ts';
 import { match, participant } from './fixtures.ts';
 
@@ -140,5 +146,80 @@ describe('the phase split', () => {
     expect(phases?.find((p) => p.name === 'línea')?.deaths).toBe(1);
     expect(phases?.find((p) => p.name === 'medio')?.deaths).toBe(1);
     expect(phases?.find((p) => p.name === 'cierre')?.kills).toBe(1);
+  });
+});
+
+describe('promediar las fases sobre varias partidas', () => {
+  const fase = (over: Partial<PhaseSplit> & { name: string }): PhaseSplit => ({
+    from: 0,
+    minutes: 14,
+    csPerMin: 7,
+    goldPerMin: 400,
+    deaths: 1,
+    kills: 1,
+    opponentCsPerMin: 6.5,
+    ...over,
+  });
+
+  it('le da a cada fase SU propio n: una partida corta no es un cierre de cero', () => {
+    // Una de 22 minutos jugó línea y medio y nunca llegó al cierre. Contarla como un cierre
+    // vacío hundiría el promedio de una fase que esa partida no jugó.
+    const promedios = phaseAverages([
+      [fase({ name: 'línea' }), fase({ name: 'medio', from: 14, minutes: 8 })],
+      [
+        fase({ name: 'línea' }),
+        fase({ name: 'medio', from: 14, minutes: 11 }),
+        fase({ name: 'cierre', from: 25, minutes: 6 }),
+      ],
+    ]);
+    const porNombre = new Map(promedios.map((p) => [p.name, p]));
+    expect(porNombre.get('línea')?.games).toBe(2);
+    expect(porNombre.get('medio')?.games).toBe(2);
+    expect(porNombre.get('cierre')?.games).toBe(1);
+  });
+
+  it('pondera por minuto jugado y no por partida', () => {
+    // Un cierre de 2 minutos y uno de 20 no pueden pesar igual: si pesaran, un puñado de
+    // segundos movería la fase entera.
+    const promedios = phaseAverages([
+      [fase({ name: 'cierre', from: 25, minutes: 2, csPerMin: 0, opponentCsPerMin: 0 })],
+      [fase({ name: 'cierre', from: 25, minutes: 20, csPerMin: 10, opponentCsPerMin: 10 })],
+    ]);
+    const cierre = promedios.find((p) => p.name === 'cierre');
+    // Promediado por partida daría 5. Ponderado por minuto son 200/22 = 9.09.
+    expect(cierre?.csPerMin).toBeCloseTo(9.09, 1);
+    expect(cierre?.minutes).toBe(22);
+  });
+
+  it('no trata un rival ausente como un rival que farmeó cero', () => {
+    const promedios = phaseAverages([
+      [fase({ name: 'línea', csPerMin: 7, opponentCsPerMin: 6 })],
+      [fase({ name: 'línea', csPerMin: 7, opponentCsPerMin: Number.NaN })],
+    ]);
+    const linea = promedios.find((p) => p.name === 'línea');
+    // Con el NaN leído como 0 el rival promediaría 3 y la diferencia sería +4.
+    expect(linea?.opponentCsPerMin).toBeCloseTo(6, 5);
+    expect(linea?.csDiff).toBeCloseTo(1, 5);
+  });
+
+  it('compara las dos puntas sobre las MISMAS partidas', () => {
+    // La partida sin rival medible no puede entrar en su promedio pero sí en el de él: serían
+    // dos muestras distintas restándose (G-015).
+    const promedios = phaseAverages([
+      [fase({ name: 'línea', csPerMin: 10, opponentCsPerMin: Number.NaN })],
+      [fase({ name: 'línea', csPerMin: 6, opponentCsPerMin: 5 })],
+    ]);
+    const linea = promedios.find((p) => p.name === 'línea');
+    expect(linea?.csDiff).toBeCloseTo(1, 5);
+    // Y su promedio general, que sí incluye las dos, se reporta aparte.
+    expect(linea?.csPerMin).toBeCloseTo(8, 5);
+  });
+
+  it('devuelve la fase con n=0 en vez de omitirla, para que el panel diga que falta', () => {
+    const promedios = phaseAverages([[fase({ name: 'línea' })]]);
+    expect(promedios).toHaveLength(3);
+    const cierre = promedios.find((p) => p.name === 'cierre');
+    expect(cierre?.games).toBe(0);
+    expect(Number.isNaN(cierre?.csDiff ?? 0)).toBe(true);
   });
 });

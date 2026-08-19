@@ -193,3 +193,83 @@ export function phaseSplit(
 
   return out;
 }
+
+export type PhaseAverage = {
+  name: string;
+  from: number;
+  /** Partidas que EFECTIVAMENTE llegaron a esta fase. Una de 22′ no cuenta en el cierre. */
+  games: number;
+  /** Minutos de juego realmente jugados adentro de la fase, sumados sobre esas partidas. */
+  minutes: number;
+  csPerMin: number;
+  /** NaN cuando ninguna de esas partidas tuvo un rival de línea medible. */
+  opponentCsPerMin: number;
+  /** Lo suyo menos lo del rival. NaN si no hay con qué compararlo. */
+  csDiff: number;
+  deathsPer10: number;
+};
+
+/**
+ * Promedia las fases sobre varias partidas.
+ *
+ * Dos cuidados que son toda la función:
+ *
+ * - **Cada fase tiene su propio n.** Una partida de 22 minutos aporta a línea y a medio y NO al
+ *   cierre; contarla como un cierre de cero minutos hundiría el promedio de una fase que esa
+ *   partida nunca jugó. `phaseSplit` ya no emite la fila, y acá cada fase cuenta las suyas.
+ * - **Las tasas se promedian por MINUTO JUGADO, no por partida.** Un cierre de 3 minutos y uno
+ *   de 20 no pesan igual; promediar las tasas crudas le daría al de 3 minutos el mismo voto y
+ *   dejaría que un puñado de segundos mueva la fase entera.
+ *
+ * Lo que devuelve está CONTAMINADO en el sentido de G-008 y no se puede leer como habilidad: el
+ * que va ganando rota y farmea menos después del 14. Por eso el número del rival viaja al lado
+ * del suyo y nunca se devuelve solo — quien lo dibuje tiene que mostrar los dos.
+ */
+export function phaseAverages(perGame: PhaseSplit[][]): PhaseAverage[] {
+  return PHASES.map((phase) => {
+    const rows = perGame.flat().filter((r) => r.name === phase.name && r.minutes > 0);
+    const minutes = rows.reduce((n, r) => n + r.minutes, 0);
+    if (rows.length === 0 || minutes === 0) {
+      return {
+        name: phase.name,
+        from: phase.from,
+        games: 0,
+        minutes: 0,
+        csPerMin: Number.NaN,
+        opponentCsPerMin: Number.NaN,
+        csDiff: Number.NaN,
+        deathsPer10: Number.NaN,
+      };
+    }
+
+    const cs = rows.reduce((n, r) => n + r.csPerMin * r.minutes, 0) / minutes;
+    const deaths = (rows.reduce((n, r) => n + r.deaths, 0) / minutes) * 10;
+
+    // Solo las partidas donde el rival de línea era medible. Tratar un NaN como 0 acá diría que
+    // el rival no farmeó nada, que es la sustitución que G-005 existe para frenar.
+    const conRival = rows.filter((r) => Number.isFinite(r.opponentCsPerMin));
+    const minutosConRival = conRival.reduce((n, r) => n + r.minutes, 0);
+    const opponent =
+      minutosConRival === 0
+        ? Number.NaN
+        : conRival.reduce((n, r) => n + r.opponentCsPerMin * r.minutes, 0) / minutosConRival;
+    // La diferencia se calcula sobre las MISMAS partidas de las dos puntas, no contra el
+    // promedio general suyo: si el rival falta en algunas, comparar contra otro denominador
+    // mezcla dos muestras distintas (G-015).
+    const mio =
+      minutosConRival === 0
+        ? Number.NaN
+        : conRival.reduce((n, r) => n + r.csPerMin * r.minutes, 0) / minutosConRival;
+
+    return {
+      name: phase.name,
+      from: phase.from,
+      games: rows.length,
+      minutes,
+      csPerMin: cs,
+      opponentCsPerMin: opponent,
+      csDiff: mio - opponent,
+      deathsPer10: deaths,
+    };
+  });
+}

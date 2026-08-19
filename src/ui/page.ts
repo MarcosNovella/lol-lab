@@ -825,6 +825,19 @@ async function renderLectura() {
       : ''));
   box.append(nota);
 
+  // Las fases: dónde se te va la ventaja entre el minuto 0 y el final.
+  const fases = el('div', 'card');
+  fases.append(el('div', 'porque', 'Tu ventaja de CS por fase, contra tu rival de línea'));
+  const holder = el('div');
+  holder.innerHTML = l.fasesSvg;
+  fases.append(holder);
+  box.append(fases);
+  box.append(el('div', 'guardada',
+    'Después del minuto 14 esto NO se lee como habilidad: el que va ganando rota y farmea ' +
+    'menos, así que una ventaja que se achica puede ser exactamente lo que hacés bien. Por eso ' +
+    'está el número del rival al lado del tuyo y no la diferencia sola. ' +
+    'Sale de ' + l.conTimeline + ' partidas con timeline en caché.'));
+
   if (l.campeones.length > 0) {
     const champs = el('div', 'card');
     champs.append(el('div', 'porque', 'Tus campeones en esas partidas'));

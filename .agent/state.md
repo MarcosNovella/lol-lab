@@ -353,11 +353,34 @@ también qué está haciendo bien, con más imágenes. ADR-025 y ADR-026.
 
 verify verde, 329 tests.
 
+### S9d — las fases, dibujadas
+
+`phaseAverages` (puro, en `curve.ts`) + `phaseBarsSvg`, en la lectura. ADR-027.
+
+- **Cada fase tiene su propio n**: una partida de 22 minutos aporta a línea y a medio y NO al
+  cierre. Contarla como un cierre de cero minutos hundiría el promedio de una fase que esa
+  partida nunca jugó.
+- **Las tasas se ponderan por MINUTO jugado, no por partida**: un cierre de 2 minutos y uno de 20
+  no pueden pesar igual, o un puñado de segundos mueve la fase entera.
+- **Las dos puntas se comparan sobre las MISMAS partidas.** Si en algunas no hay rival de línea
+  medible, su promedio y el del rival saldrían de muestras distintas (G-015); la diferencia se
+  calcula solo sobre las partidas donde los dos existen, y su promedio general se reporta aparte.
+- Un rival ausente NO es un rival que farmeó cero (G-005).
+- **La leyenda dice que después del 14 esto no se lee como habilidad.** Todo `phaseSplit` está
+  contaminado en el sentido de G-008 — el que va ganando rota y farmea menos — así que una
+  ventaja que se achica puede ser exactamente lo que hace bien. Por eso el número del rival va
+  al lado del suyo y la diferencia nunca viaja sola.
+- Builder aparte y no un parámetro de escala en `metricBarsSvg`: aquellas barras son tamaños de
+  efecto y estas son CS/min de verdad. Una misma longitud con dos unidades atrás es cómo un
+  gráfico miente sin decir nada falso.
+- Visto en el navegador: la barra más larga del gráfico de métricas terminaba PEGADA al número.
+
+verify verde, 334 tests.
+
 ### Lo que la lectura TODAVÍA no muestra, y por qué
 - **El reparto por tag** ("cuando decís que la produjiste vos, ¿cuánto perdés?") es la respuesta
   más directa a "qué patrón no repetir", y hoy mostraría cero: el backlog se cerró por decisión
   (ADR-019) y el tagueo arranca con la próxima partida. Vale la pena recién con unas semanas.
-- **Las fases** (línea / medio / cierre) están calculadas y no dibujadas.
 
 ## Open questions
 - **Diana**: closed by D3 as "the ledger decides", with the caveat that at n=5 needing 25, and 8

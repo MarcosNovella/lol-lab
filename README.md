@@ -82,6 +82,11 @@ afuera**: su promedio está dominado por las partidas que ganaste, así que sirv
 no para encabezar nada. Si ninguna métrica se destaca de verdad, no titula nada en vez de
 inventar un titular.
 
+También están **las tres fases** —línea, medio y cierre— con tu CS por minuto contra el de tu
+rival en cada una. Ojo con leerlas como habilidad después del minuto 14: el que va ganando rota y
+farmea menos, así que una ventaja que se achica puede ser exactamente lo que estás haciendo bien.
+Por eso el número del rival va siempre al lado del tuyo.
+
 Debajo están los momentos más caros, la curva, el mapa de muertes, el briefing de antes de jugar,
 y recién después lo operativo: sincronizar, taguear, la puesta al día y la key.
 

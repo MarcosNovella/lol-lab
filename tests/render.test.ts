@@ -9,6 +9,7 @@ import {
   type MetricBar,
   mapPoint,
   metricBarsSvg,
+  phaseBarsSvg,
   renderPage,
   SVG_STYLE,
 } from '../src/analysis/render.ts';
@@ -173,6 +174,11 @@ describe('the SVGs carry no presentation of their own', () => {
         { label: 'CS a los 10', effect: 0.8, detail: '68,2 vs 64,1', games: 39 },
         { label: 'Muertes por minuto', effect: -0.5, detail: '0,18 vs 0,14', games: 39 },
         { label: 'Placas', effect: Number.NaN, detail: '2 vs 2', games: 39 },
+      ]) +
+      phaseBarsSvg([
+        { name: 'línea', csDiff: 0.7, detail: '7,4 vs 6,7 CS/min', games: 39, minutes: 546 },
+        { name: 'cierre', csDiff: -0.11, detail: '6,1 vs 6,2 CS/min', games: 12, minutes: 90 },
+        { name: 'sin datos', csDiff: Number.NaN, detail: 'sin rival', games: 0, minutes: 0 },
       ]);
     // Separadas por espacio: un `class="bar mejor"` son DOS clases, y buscarlo entero no
     // encuentra la regla `path.bar.mejor` aunque exista.

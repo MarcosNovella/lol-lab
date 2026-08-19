@@ -15,7 +15,7 @@ import {
   untaggedGames,
 } from '../analysis/capture.ts';
 import { coverageOf, coverageTotals } from '../analysis/coverage.ts';
-import { stateCurve } from '../analysis/curve.ts';
+import { type PhaseSplit, phaseAverages, phaseSplit, stateCurve } from '../analysis/curve.ts';
 import { evaluationsOf, listHypotheses } from '../analysis/hypotheses.ts';
 import { itemRace } from '../analysis/items.ts';
 import { collectMatchups } from '../analysis/matchups.ts';
@@ -31,6 +31,7 @@ import {
   isOwnHalf,
   type MetricBar,
   metricBarsSvg,
+  phaseBarsSvg,
 } from '../analysis/render.ts';
 import { assembleBriefing, PregameError } from '../pregame.ts';
 import { KeyError, keyState, writeKey } from '../riot/key.ts';
@@ -840,6 +841,10 @@ export type Lectura = {
   /** Cuántas quedaron afuera por estar contaminadas, para que el silencio no sea invisible. */
   contaminadas: number;
   campeones: { campeon: string; partidas: number; victorias: number }[];
+  /** Las tres fases contra el rival de línea, ya dibujadas. */
+  fasesSvg: string;
+  /** Cuántas de las partidas leídas tenían timeline: sin él no hay fases. */
+  conTimeline: number;
   notas: string[];
 };
 
@@ -907,6 +912,26 @@ export function lectura(db: Db, cuenta: string, limite = 40): Lectura {
     campeones.set(row.champion, actual);
   }
 
+  // Las fases necesitan timeline, que no todas las partidas tienen: las que no, no cuentan como
+  // una fase de cero, no cuentan para nada (G-005).
+  const porPartida: PhaseSplit[][] = [];
+  let conTimeline = 0;
+  for (const row of queryParticipants(db, {
+    puuid,
+    queueId: QUEUE.soloq,
+    limit: limite,
+    ...(rol !== null ? { role: rol } : {}),
+  })) {
+    const partido = getRawMatch(db, row.matchId);
+    const timeline = getRawTimeline(db, row.matchId);
+    if (partido === null || timeline === null) continue;
+    const split = phaseSplit(partido, timeline, puuid);
+    if (split === null) continue;
+    conTimeline += 1;
+    porPartida.push(split);
+  }
+  const fases = phaseAverages(porPartida);
+
   return {
     cuenta: label,
     rol: result.role === 'todos' ? 'todos los roles' : roleLabel(result.role),
@@ -938,6 +963,20 @@ export function lectura(db: Db, cuenta: string, limite = 40): Lectura {
     campeones: [...campeones]
       .map(([campeon, v]) => ({ campeon, ...v }))
       .sort((a, b) => b.partidas - a.partidas),
+    fasesSvg: phaseBarsSvg(
+      fases.map((f) => ({
+        name: f.name,
+        csDiff: f.csDiff,
+        games: f.games,
+        minutes: f.minutes,
+        // Los dos números crudos, siempre: la diferencia sola se leería como habilidad, y todo
+        // esto está contaminado por ir ganando (G-008).
+        detail: Number.isFinite(f.csDiff)
+          ? `${f.csPerMin.toFixed(2)} vs ${f.opponentCsPerMin.toFixed(2)} CS/min`
+          : 'sin rival de línea medible',
+      })),
+    ),
+    conTimeline,
     notas: result.notes,
   };
 }

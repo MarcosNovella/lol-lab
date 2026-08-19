@@ -206,7 +206,9 @@ export function metricBarsSvg(rows: MetricBar[], width = 720): string {
   const barH = 13;
   const top = 22;
   const height = top + rows.length * rowH + 10;
-  const plot = width - gutter - 82;
+  // 96 y no 82: con el ancho justo la barra más larga terminaba PEGADA al número, sin espacio
+  // entre la marca y el texto que la explica.
+  const plot = width - gutter - 96;
   const zero = gutter + plot / 2;
   const half = plot / 2;
 
@@ -259,8 +261,92 @@ ${barras}
 </svg>`;
 }
 
+export type PhaseBar = {
+  name: string;
+  /** Lo suyo menos lo del rival de línea, en CS por minuto. NaN si no hay con qué comparar. */
+  csDiff: number;
+  /** Los dos números crudos, para que la diferencia nunca viaje sola. */
+  detail: string;
+  games: number;
+  minutes: number;
+};
+
 /**
- * The CSS the SVG builders REQUIRE, and the variables it reads."""
+ * Las tres fases: dónde se te va la ventaja entre el minuto 0 y el final.
+ *
+ * Es la misma gramática que `metricBarsSvg` —cero en el medio, azul a la derecha, naranja a la
+ * izquierda, extremo redondeado del lado que se aleja— pero NO la misma escala, y por eso es una
+ * función aparte: acá el largo son CS por minuto de verdad, no un tamaño de efecto. Reusar aquel
+ * builder habría puesto dos unidades distintas atrás de la misma longitud, que es exactamente
+ * cómo un gráfico miente sin decir nada falso.
+ *
+ * La escala se calcula sobre los datos, con un piso de 1 CS/min: sin el piso, tres fases parejas
+ * en 0.05 se dibujan como tres barras enormes.
+ *
+ * El número del rival va SIEMPRE al lado del suyo, porque todo esto está contaminado en el
+ * sentido de G-008 — el que va gana rota y farmea menos después del 14 — y la diferencia sola se
+ * leería como habilidad.
+ */
+export function phaseBarsSvg(rows: PhaseBar[], width = 720): string {
+  const medibles = rows.filter((r) => Number.isFinite(r.csDiff));
+  if (medibles.length === 0) {
+    return `<svg viewBox="0 0 ${width} 40" width="100%"><text class="tag" x="8" y="22">todavía no hay partidas con timeline para separar las fases</text></svg>`;
+  }
+
+  const gutter = 150;
+  const rowH = 34;
+  const barH = 15;
+  const top = 22;
+  const height = top + rows.length * rowH + 10;
+  const plot = width - gutter - 190;
+  const zero = gutter + plot / 2;
+  const half = plot / 2;
+  const extent = Math.max(1, ...medibles.map((r) => Math.abs(r.csDiff)));
+
+  const barras = rows
+    .map((row, i) => {
+      const cy = top + i * rowH + rowH / 2;
+      const y = cy - barH / 2;
+      const nombre =
+        `<text class="barlabel" x="${gutter - 10}" y="${cy + 1}" text-anchor="end">` +
+        `${esc(row.name)}</text>`;
+      const bajo =
+        `<text class="tag" x="${gutter - 10}" y="${cy + 14}" text-anchor="end">` +
+        `${esc(row.games === 0 ? 'sin partidas' : `${row.games} partidas`)}</text>`;
+      const titulo = `<title>${esc(`${row.name}: ${row.detail}`)}</title>`;
+
+      if (!Number.isFinite(row.csDiff)) {
+        return `<g>${titulo}${nombre}${bajo}<text class="tag" x="${zero + 6}" y="${cy + 4}">no llegaste a esta fase todavía</text></g>`;
+      }
+
+      const fin = zero + (row.csDiff / extent) * half;
+      const mejor = row.csDiff >= 0;
+      const ancho = Math.max(2, Math.abs(fin - zero));
+      const inicio = mejor ? zero : zero - ancho;
+      const r = Math.min(4, ancho);
+      const d = mejor
+        ? `M ${inicio} ${y} H ${inicio + ancho - r} A ${r} ${r} 0 0 1 ${inicio + ancho} ${y + r} V ${y + barH - r} A ${r} ${r} 0 0 1 ${inicio + ancho - r} ${y + barH} H ${inicio} Z`
+        : `M ${inicio + ancho} ${y} H ${inicio + r} A ${r} ${r} 0 0 0 ${inicio} ${y + r} V ${y + barH - r} A ${r} ${r} 0 0 0 ${inicio + r} ${y + barH} H ${inicio + ancho} Z`;
+
+      const signo = row.csDiff >= 0 ? '+' : '';
+      const valor =
+        `<text class="barvalue" x="${width - 184}" y="${cy + 1}">` +
+        `${esc(`${signo}${row.csDiff.toFixed(2)} CS/min`)}</text>` +
+        `<text class="tag" x="${width - 184}" y="${cy + 14}">${esc(row.detail)}</text>`;
+      return `<g>${titulo}${nombre}${bajo}<path class="bar ${mejor ? 'mejor' : 'peor'}" d="${d}"/>${valor}</g>`;
+    })
+    .join('\n');
+
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="Tu ventaja de CS por fase, contra tu rival de línea">
+  <text class="tag" x="${zero - half}" y="12">farmea más él</text>
+  <text class="tag" x="${zero + half}" y="12" text-anchor="end">farmeás más vos</text>
+  <line class="zero" x1="${zero}" y1="${top - 6}" x2="${zero}" y2="${height - 8}"/>
+${barras}
+</svg>`;
+}
+
+/**
+ * The CSS the SVG builders REQUIRE, and the variables it reads.""""""
  *
  * Exported and shared, not copied. The builders emit `class="plot"`, `class="own"` and so on and
  * carry no presentation of their own, so an SVG pasted into a document that lacks these rules
