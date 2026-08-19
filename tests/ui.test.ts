@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { tagGame, tagOf } from '../src/analysis/capture.ts';
 import { flattenMatch } from '../src/analysis/flatten.ts';
 import { escapeForCmd } from '../src/cli/ui.ts';
+import { safeAssetName } from '../src/riot/assets.ts';
 import { type Db, openDb } from '../src/store/db.ts';
 import {
   finishSyncLog,
@@ -587,5 +588,41 @@ describe('dejar atrás el backlog', () => {
     expect(pendientes(db, 'smurf', now + 3 * HOUR).deLaSesion.map((p) => p.matchId)).toEqual([
       'LA2_NEXT',
     ]);
+  });
+});
+
+describe('las imágenes locales', () => {
+  it('rejects anything that is not a bare file name', () => {
+    expect(safeAssetName('Ahri.png')).toBe(true);
+    expect(safeAssetName('3100.png')).toBe(true);
+    // The server hands this to the filesystem, so these are the ones that matter.
+    expect(safeAssetName('../.env')).toBe(false);
+    expect(safeAssetName('..')).toBe(false);
+    expect(safeAssetName('a/b.png')).toBe(false);
+    expect(safeAssetName('a\b.png')).toBe(false);
+    expect(safeAssetName('')).toBe(false);
+  });
+
+  it('serves art without a token but refuses to leave its folder', async () => {
+    const db = openDb(':memory:');
+    const ui = await startUiOnFreePort({ port: 45840, db });
+
+    // No token at all: the art is Riot's, carries nothing about him, and staying token-free is
+    // what lets the memoised SVG survive a reboot.
+    const traversal = await fetch(
+      `${ui.url.split('/?')[0]}/img/champion/${encodeURIComponent('../../.env')}`,
+    );
+    expect(traversal.status).toBe(404);
+
+    const rareFolder = await fetch(`${ui.url.split('/?')[0]}/img/otra/cosa.png`);
+    expect(rareFolder.status).toBe(404);
+
+    // A well-formed name that is simply not downloaded says what to run, rather than 500ing.
+    const missing = await fetch(`${ui.url.split('/?')[0]}/img/champion/NoExiste.png`);
+    expect(missing.status).toBe(404);
+    expect(((await missing.json()) as { error: string }).error).toContain('lol assets');
+
+    await new Promise<void>((r) => ui.server.close(() => r()));
+    db.close();
   });
 });

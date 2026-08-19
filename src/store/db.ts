@@ -18,6 +18,14 @@ const SCHEMA_PATH = join(HERE, 'schema.sql');
 
 export const DEFAULT_DB_PATH = join(PROJECT_ROOT, 'data', 'riot.db');
 
+/**
+ * Where the downloaded pictures live: beside the cache, inside the gitignored `data/`.
+ *
+ * They are derived and re-downloadable, exactly like the match cache, so they are not committed
+ * — and `lol assets` rebuilds the folder from nothing whenever it is missing.
+ */
+export const ASSETS_ROOT = join(PROJECT_ROOT, 'data', 'img');
+
 export type Db = DatabaseSync;
 
 export function openDb(path: string = DEFAULT_DB_PATH): Db {

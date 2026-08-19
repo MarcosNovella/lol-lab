@@ -1,3 +1,4 @@
+import * as assets from './cli/assets.ts';
 import * as cerrar from './cli/cerrar.ts';
 import * as cobertura from './cli/cobertura.ts';
 import * as growth from './cli/growth.ts';
@@ -43,6 +44,7 @@ const COMMANDS: Record<string, Command> = {
   page: { summary: page.SUMMARY, usage: page.USAGE, run: page.run },
   hip: { summary: hip.SUMMARY, usage: hip.USAGE, run: hip.run },
   items: { summary: items.SUMMARY, usage: items.USAGE, run: items.run },
+  assets: { summary: assets.SUMMARY, usage: assets.USAGE, run: assets.run },
   rank: { summary: rank.SUMMARY, usage: rank.USAGE, run: rank.run },
 };
 

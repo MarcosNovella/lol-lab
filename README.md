@@ -83,6 +83,10 @@ sin rate limit, un catálogo por parche que hayas jugado) y con eso el reporte y
 decirte cuándo completaste cada ítem y cuándo lo completó tu rival de línea. Después de un parche
 nuevo, corrélo una vez.
 
+`pnpm lol assets` es de una sola vez a secas: baja los retratos de campeón, los íconos de ítem y
+el minimapa (5.9 MB) a `data/img/`, y el panel los sirve desde tu máquina. No hay hotlink a la
+CDN de Riot: sin esto la página funciona igual, pero en texto.
+
 ## Las tools
 
 Dos prefijos: `riot_*` toca la API y la caché, `lol_*` le pregunta cosas al motor y no gasta

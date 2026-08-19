@@ -74,12 +74,30 @@ button.on { background: #2f4d38; border-color: var(--ok); }
 .barra { height: 6px; background: #0b0d11; border-radius: 3px; overflow: hidden; margin-top: 10px; }
 .barra > div { height: 100%; background: var(--ok); width: 0; transition: width .2s; }
 .log { color: var(--dim); font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
+/* Champion portraits. Square art, rounded, with a ring that says who won. */
+.face { width: 34px; height: 34px; border-radius: 8px; flex: none; background: #0b0d11;
+        border: 1px solid var(--line); object-fit: cover; }
+.face.chico { width: 24px; height: 24px; border-radius: 6px; }
+.face.gano { border-color: var(--ok); }
+.face.perdio { border-color: var(--bad); }
+.duelo { display: flex; align-items: center; gap: 8px; }
+.duelo .vs { color: var(--dim); font-size: 12px; }
+.cabeza { display: flex; align-items: center; gap: 10px; margin-bottom: 2px; }
+.cabeza .nombres { font-weight: 600; }
+.pill { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; font-weight: 600;
+        border-radius: 999px; padding: 2px 9px; border: 1px solid currentColor; }
 .momento { font-variant-numeric: tabular-nums; padding: 3px 0; }
 .momento .min { color: var(--warn); }
-/* The build: two labelled rows, his and his opponent's, on the same grid so the minutes line up. */
-.build { display: grid; grid-template-columns: 4.5em 1fr; gap: 2px 10px; margin: 8px 0 4px;
-         font-variant-numeric: tabular-nums; font-size: 13px; }
-.build .k { color: var(--dim); }
+/* The build: two rows of item icons with the minute under each, his and his opponent's. */
+.build { display: grid; grid-template-columns: 3.6em 1fr; gap: 6px 10px; margin: 10px 0 4px;
+         align-items: center; font-variant-numeric: tabular-nums; font-size: 12px; }
+.build .k { color: var(--dim); font-size: 12px; }
+.items { display: flex; gap: 8px; flex-wrap: wrap; }
+.item { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 44px; }
+.item img { width: 40px; height: 40px; border-radius: 7px; border: 1px solid var(--line);
+            background: #0b0d11; }
+.item .min { color: var(--dim); font-size: 11px; }
+.item.tarde img { border-color: var(--warn); }
 .tag { font-size: 12px; color: var(--dim); border: 1px solid var(--line);
        border-radius: 5px; padding: 1px 6px; margin-left: 8px; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -113,6 +131,20 @@ const api = (path) => fetch(path + (path.includes('?') ? '&' : '?') + 't=' + TOK
     if (!r.ok) throw new Error(body.error || r.statusText);
     return body;
   });
+
+/* A champion portrait, or nothing if the art is missing: the name is always in the text
+   beside it, so a 404 has to degrade to plain text rather than to a broken-image icon. */
+const cara = (campeon, cls) => {
+  if (!campeon) return null;
+  const img = document.createElement('img');
+  img.className = 'face' + (cls ? ' ' + cls : '');
+  img.src = '/img/champion/' + encodeURIComponent(campeon) + '.png';
+  img.alt = campeon;
+  img.title = campeon;
+  img.loading = 'lazy';
+  img.onerror = () => img.remove();
+  return img;
+};
 
 const el = (tag, cls, text) => {
   const node = document.createElement(tag);
@@ -212,6 +244,10 @@ let sesion = null;
 
 function tarjetaPartida(p, alTaguear) {
   const card = el('div', 'card partida');
+  /* The portrait is the fastest way to recognise WHICH game this was: he remembers the champion
+     he played long before he remembers the timestamp. */
+  const retrato = cara(p.campeon, p.gano ? 'gano' : 'perdio');
+  if (retrato) card.append(retrato);
   const quien = el('div', 'quien');
   quien.append(el('span', null, p.campeon + '  '));
   quien.append(el('span', p.gano ? 'victoria' : 'derrota', p.gano ? 'victoria' : 'DERROTA'));
@@ -403,9 +439,21 @@ async function renderMomentos() {
   }
   for (const p of partidas) {
     const card = el('div', 'card');
-    const head = el('div', 'que');
-    head.append(el('span', null, p.campeon + (p.rival ? ' vs ' + p.rival : '') + '  '));
-    head.append(el('span', p.gano ? 'victoria' : 'derrota', p.gano ? 'victoria' : 'DERROTA'));
+    const head = el('div', 'cabeza');
+    const mia = cara(p.campeon, p.gano ? 'gano' : 'perdio');
+    if (mia) head.append(mia);
+    const nombres = el('div', 'nombres');
+    nombres.append(el('span', null, p.campeon));
+    if (p.rival) {
+      nombres.append(el('span', 'vs', '  vs  '));
+      nombres.append(el('span', null, p.rival));
+    }
+    head.append(nombres);
+    const suya = cara(p.rival, 'chico');
+    if (suya) head.append(suya);
+    const pill = el('span', 'pill ' + (p.gano ? 'victoria' : 'derrota'), p.gano ? 'victoria' : 'derrota');
+    pill.style.marginLeft = 'auto';
+    head.append(pill);
     if (p.tag) head.append(el('span', 'tag', p.tag));
     card.append(head);
     card.append(el('div', 'cuando',
@@ -426,11 +474,28 @@ async function renderMomentos() {
     // The build sits under the moments and above the caveats: it is the same game read from
     // another angle, and the timing only means something next to how the game was going.
     if (p.items && p.items.mios.length > 0) {
+      const fila = (pasos) => {
+        const box = el('div', 'items');
+        if (pasos.length === 0) { box.append(el('span', 'dim', '—')); return box; }
+        for (const paso of pasos) {
+          const celda = el('div', 'item');
+          const img = document.createElement('img');
+          img.src = '/img/item/' + paso.id + '.png';
+          img.alt = paso.nombre;
+          img.title = paso.nombre + ' — ' + paso.min;
+          img.loading = 'lazy';
+          img.onerror = () => { celda.replaceChildren(el('span', null, paso.nombre)); };
+          celda.append(img);
+          celda.append(el('span', 'min', paso.min));
+          box.append(celda);
+        }
+        return box;
+      };
       const build = el('div', 'build');
-      build.append(el('div', 'k', 'ítems'));
-      build.append(el('div', null, p.items.mios.join('  ·  ')));
+      build.append(el('div', 'k', 'vos'));
+      build.append(fila(p.items.mios));
       build.append(el('div', 'k', 'rival'));
-      build.append(el('div', null, p.items.suyos.length > 0 ? p.items.suyos.join('  ·  ') : '—'));
+      build.append(fila(p.items.suyos));
       card.append(build);
       if (p.items.primerItemMin !== null) {
         const g = p.items.primerItemMin;

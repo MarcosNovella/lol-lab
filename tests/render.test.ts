@@ -157,7 +157,11 @@ describe('the SVGs carry no presentation of their own', () => {
       { minute: 5, goldDiff: 300, xpDiff: 0, csDiff: 0, teamGoldDiff: 0 },
       { minute: 10, goldDiff: -300, xpDiff: 0, csDiff: 0, teamGoldDiff: 0 },
     ];
-    const svg = deathMapSvg(dots) + goldCurveSvg(points);
+    // Both variants of the map: with the minimap photo underneath it emits `mapveil`, which is
+    // a class like any other and needs a rule on both surfaces or the veil renders as an
+    // opaque black plate over the picture.
+    const svg =
+      deathMapSvg(dots) + deathMapSvg(dots, 520, '/img/map/map11.png') + goldCurveSvg(points);
     return [...new Set([...svg.matchAll(/class="([^"]+)"/g)].map((m) => m[1] ?? ''))];
   }
 
@@ -178,5 +182,29 @@ describe('the SVGs carry no presentation of their own', () => {
     for (const clase of clasesEmitidas()) {
       expect(CLIENT_STYLE, `la UI no estila .${clase}`).toContain(`.${clase}`);
     }
+  });
+});
+
+describe('el mapa con el minimapa de fondo', () => {
+  const dots: DeathDot[] = [
+    { position: { x: 3000, y: 3000 }, teamId: 100, minute: 12, costGold: -400, label: 'a' },
+  ];
+
+  it('draws the photograph and veils it, only when a background is given', () => {
+    const sinFoto = deathMapSvg(dots);
+    expect(sinFoto).toContain('class="plot"');
+    expect(sinFoto).not.toContain('<image');
+
+    const conFoto = deathMapSvg(dots, 520, '/img/map/map11.png');
+    expect(conFoto).toContain('<image href="/img/map/map11.png"');
+    expect(conFoto).toContain('class="mapveil"');
+    // The plate replaces the flat background rather than sitting on top of it.
+    expect(conFoto).not.toContain('class="plot"');
+    // And the deaths are still drawn over both.
+    expect(conFoto).toContain('class="own"');
+  });
+
+  it('escapes the URL, since it lands inside an attribute', () => {
+    expect(deathMapSvg(dots, 520, '/img/map/x".png')).toContain('x&quot;.png');
   });
 });

@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   abandonedByCutoff,
   closeSession,
@@ -23,6 +25,7 @@ import { describeRank, latestSnapshot, TRACKED_QUEUES } from '../analysis/rank.t
 import { type DeathDot, deathMapSvg, goldCurveSvg, isOwnHalf } from '../analysis/render.ts';
 import { keyState } from '../riot/key.ts';
 import type { Db } from '../store/db.ts';
+import { ASSETS_ROOT } from '../store/db.ts';
 import { catalogForPatch } from '../store/items.ts';
 import {
   findAccount,
@@ -434,8 +437,14 @@ export type MomentoPartida = {
   gano: boolean;
   tag: string | null;
   momentos: { minuto: string; linea: string; oro: number }[];
-  /** The build, his against his lane opponent's. `null` when the patch has no catalogue cached. */
-  items: { mios: string[]; suyos: string[]; primerItemMin: number | null } | null;
+  /** The build, his against his lane opponent's. `null` when the patch has no catalogue cached.
+   *  The item ID travels so the page can show the icon; the name travels beside it so a missing
+   *  picture degrades to text instead of to a blank square. */
+  items: {
+    mios: { id: number; nombre: string; min: string }[];
+    suyos: { id: number; nombre: string; min: string }[];
+    primerItemMin: number | null;
+  } | null;
   sinMedir: number;
   sinTimeline: boolean;
 };
@@ -495,8 +504,8 @@ export function momentos(db: Db, cuenta: string, limite = 5): MomentoPartida[] {
         race === null
           ? null
           : {
-              mios: race.mine.map((c) => `${c.at} ${c.name}`),
-              suyos: race.theirs.map((c) => `${c.at} ${c.name}`),
+              mios: race.mine.map((c) => ({ id: c.itemId, nombre: c.name, min: c.at })),
+              suyos: race.theirs.map((c) => ({ id: c.itemId, nombre: c.name, min: c.at })),
               primerItemMin: race.firstGapMinutes,
             },
       sinMedir: unmeasurable,
@@ -600,7 +609,13 @@ export function graficos(db: Db, cuenta: string, limite = 10): Graficos {
 
   const valor: Graficos = {
     curva,
-    mapa: deathMapSvg(dots),
+    // The photograph only goes in when it is actually on disk: a broken <image> inside the SVG
+    // would draw nothing and look like the black-square bug all over again (G-023).
+    mapa: deathMapSvg(
+      dots,
+      520,
+      existsSync(join(ASSETS_ROOT, 'map', 'map11.png')) ? '/img/map/map11.png' : null,
+    ),
     muertes: dots.length,
     propiaMitad: dots.filter((d) => isOwnHalf(d.position, d.teamId)).length,
     partidas: conTimeline,

@@ -1,9 +1,12 @@
 import { randomBytes } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { join } from 'node:path';
 import { snapshotAll } from '../cli/rank.ts';
+import { safeAssetName } from '../riot/assets.ts';
 import { createClient } from '../riot/client.ts';
 import type { Db } from '../store/db.ts';
-import { openDb } from '../store/db.ts';
+import { ASSETS_ROOT, openDb } from '../store/db.ts';
 import { syncMatches } from '../sync.ts';
 import { renderShell } from './page.ts';
 import {
@@ -205,6 +208,34 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
     // carries no data and every API call from it needs the token like anything else.
     if (url.pathname === '/' && url.searchParams.get('t') === null) {
       html(response, renderShell(null));
+      return;
+    }
+
+    // Pictures are served BEFORE the token check, and deliberately: they are Riot's public art,
+    // they carry nothing about him, and keeping them token-free means the SVG that embeds the
+    // minimap can be memoised across boots instead of being invalidated by every new token.
+    // `safeAssetName` plus the fixed set of folders is what stops `/img/champion/../../.env`.
+    if (url.pathname.startsWith('/img/')) {
+      const [, , kind, file] = url.pathname.split('/');
+      if (
+        (kind !== 'champion' && kind !== 'item' && kind !== 'map') ||
+        file === undefined ||
+        !safeAssetName(file)
+      ) {
+        json(response, 404, { error: 'no existe esa imagen' });
+        return;
+      }
+      const path = join(ASSETS_ROOT, kind, file);
+      if (!existsSync(path)) {
+        json(response, 404, { error: 'falta esa imagen — corré `lol assets`' });
+        return;
+      }
+      response.writeHead(200, {
+        'content-type': 'image/png',
+        // Immutable art on a local server: the browser should not ask twice in a session.
+        'cache-control': 'private, max-age=86400',
+      });
+      response.end(readFileSync(path));
       return;
     }
 

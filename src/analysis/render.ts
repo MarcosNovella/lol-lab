@@ -59,7 +59,21 @@ export type DeathDot = {
 const esc = (text: string): string =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-export function deathMapSvg(deaths: DeathDot[], size = 520): string {
+/**
+ * The death map.
+ *
+ * `background` is the URL of the Rift minimap, and passing it changes the drawing from a grid
+ * with dots into a map with dots: lanes, jungle camps and the river are then READ rather than
+ * inferred from an anti-diagonal, which is the whole difference between "62% of his deaths are
+ * near the mid axis" as a number and as a picture. It is optional because the static page has no
+ * server to fetch it from (`lol page` writes one file and nothing else), and the grid version
+ * has to stay correct on its own.
+ */
+export function deathMapSvg(
+  deaths: DeathDot[],
+  size = 520,
+  background: string | null = null,
+): string {
   const dots = deaths
     .map((death) => {
       const { cx, cy } = mapPoint(death.position, size);
@@ -75,10 +89,24 @@ export function deathMapSvg(deaths: DeathDot[], size = 520): string {
     })
     .join('\n');
 
+  // With the photograph underneath, the guide lines get thinner and the plate darkens the image
+  // so the dots stay the brightest thing on it — the map is context, the deaths are the subject.
+  const base =
+    background === null
+      ? `  <rect class="plot" x="0" y="0" width="${size}" height="${size}" rx="6"/>`
+      : `  <image href="${esc(background)}" x="0" y="0" width="${size}" height="${size}" preserveAspectRatio="none"/>\n` +
+        `  <rect class="mapveil" x="0" y="0" width="${size}" height="${size}" rx="6"/>`;
+
+  // The half boundary stays in both versions — it is what "your half" MEANS and it is not
+  // visible on the artwork. The base-to-base diagonal is dropped over the photo: it traces mid
+  // lane, which the picture already draws better than a dashed line can.
+  const guides =
+    `  <line class="mid" x1="0" y1="${size}" x2="${size}" y2="0"/>` +
+    (background === null ? `\n  <line class="half" x1="0" y1="0" x2="${size}" y2="${size}"/>` : '');
+
   return `<svg viewBox="0 0 ${size} ${size}" width="100%" role="img" aria-label="Mapa de muertes">
-  <rect class="plot" x="0" y="0" width="${size}" height="${size}" rx="6"/>
-  <line class="mid" x1="0" y1="${size}" x2="${size}" y2="0"/>
-  <line class="half" x1="0" y1="0" x2="${size}" y2="${size}"/>
+${base}
+${guides}
   <text class="tag" x="8" y="${size - 8}">tu base (azul)</text>
   <text class="tag" x="${size - 8}" y="16" text-anchor="end">base enemiga (rojo)</text>
 ${dots}
@@ -145,14 +173,19 @@ ${ticks}
 export const SVG_STYLE = `
 svg { display: block; max-width: 100%; }
 rect.plot { fill: var(--plot); }
+/* The veil over the minimap photo: without it the dots compete with the artwork. */
+rect.mapveil { fill: #0b0d11; fill-opacity: .55; }
 line.mid { stroke: var(--grid); stroke-width: 1.5; }
 line.half { stroke: var(--grid); stroke-width: 1; stroke-dasharray: 4 4; }
 line.zero { stroke: var(--grid); stroke-width: 1.5; }
 polyline.curve { fill: none; stroke: var(--fg); stroke-width: 2; }
 circle.up { fill: var(--up); } circle.down { fill: var(--down); }
-circle.own { fill: var(--own); fill-opacity: .65; }
-circle.enemy { fill: var(--enemy); fill-opacity: .65; }
-text.tag { fill: var(--muted); font-size: 10px; }
+/* Opaque enough to read over the minimap photo, and outlined so overlapping deaths stay
+   countable instead of merging into one blob. */
+circle.own { fill: var(--own); fill-opacity: .8; stroke: #0b0d11; stroke-opacity: .55; stroke-width: 1; }
+circle.enemy { fill: var(--enemy); fill-opacity: .8; stroke: #0b0d11; stroke-opacity: .55; stroke-width: 1; }
+text.tag { fill: var(--muted); font-size: 10px; paint-order: stroke; stroke: #0b0d11;
+           stroke-width: 3px; stroke-linejoin: round; }
 `;
 
 /**

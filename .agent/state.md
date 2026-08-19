@@ -222,6 +222,29 @@ not downloaded), immutable per version. ADR-020.
 
 verify green, 285 tests.
 
+### S8f — el panel con imágenes
+
+Pedido suyo: que se entienda de un vistazo. ADR-021.
+
+- `lol assets` baja una vez el arte de Data Dragon a `data/img/` (gitignoreado): 163 campeones,
+  240 ítems y el minimapa, 5.9 MB. Se sirve desde el servidor local, **nunca hotlinkeado** — la
+  página promete que nada sale de la máquina y un `<img>` a la CDN lo rompía en cada carga.
+- Retratos de campeón en cada tarjeta (anillo verde/rojo según resultado) y en las tarjetas de
+  tagueo, que es donde más ayuda: se reconoce la partida por la cara antes que por la hora.
+- La build ahora son íconos de ítem con el minuto debajo, en dos filas (vos / rival).
+- **El mapa de muertes tiene el minimapa real de fondo**, con un velo para que los puntos sigan
+  siendo lo más brillante, puntos con contorno para que no se fusionen y la diagonal
+  base-a-base retirada porque la foto ya dibuja mid mejor que una línea punteada.
+- Los archivos se guardan con el nombre que usa el MATCH, no el de Data Dragon: así la página
+  arma la URL con lo que ya tiene, y el caso `FiddleSticks`/`Fiddlesticks` (G-016) se resuelve
+  al bajar en vez de fallar como imagen rota.
+- `/img/*` se sirve ANTES del token: es arte público de Riot, no dice nada de él, y así el SVG
+  memoizado del mapa sobrevive a un reinicio. El path traversal se cierra con `safeAssetName`
+  más tres carpetas fijas, con test.
+- Sin librerías: la legibilidad vino del arte, no de un renderer (ADR-003 sigue en pie).
+
+verify verde, 289 tests. Visto en el navegador, no supuesto.
+
 ## Open questions
 - **Diana**: closed by D3 as "the ledger decides", with the caveat that at n=5 needing 25, and 8
   games since he last played her, it may never reach n.
