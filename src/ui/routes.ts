@@ -1,6 +1,9 @@
 import {
+  abandonedByCutoff,
   closeSession,
+  getTagCutoff,
   openSession,
+  setTagCutoff,
   TAGS,
   type Tag,
   tagGame,
@@ -50,6 +53,8 @@ export type EstadoCuenta = {
   label: string;
   puuid: string;
   pendientes: number;
+  /** Untagged games the cutoff decision left behind. Reported, never silently dropped. */
+  dejadasAtras: number;
   ultimoSync: { at: number; terminado: boolean; fetched: number; error: string | null } | null;
   rango: { cola: string; texto: string; wins: number | null; losses: number | null }[];
 };
@@ -67,6 +72,8 @@ export type Estado = {
   cuentas: EstadoCuenta[];
   key: EstadoKey;
   pendientesTotal: number;
+  /** The dated decision, or null while every game is still askable. */
+  corteDeTagueo: { at: number; setAt: number; dejadasAtras: number } | null;
   acciones: Accion[];
 };
 
@@ -78,6 +85,7 @@ export type Estado = {
  */
 export function estado(db: Db, now: number = Date.now()): Estado {
   const key = keyState(new Date(now));
+  const corte = getTagCutoff(db);
   const cuentas: EstadoCuenta[] = [];
 
   for (const account of listAccounts(db)) {
@@ -87,6 +95,7 @@ export function estado(db: Db, now: number = Date.now()): Estado {
       label: account.label ?? account.gameName,
       puuid: account.puuid,
       pendientes,
+      dejadasAtras: abandonedByCutoff(db, account.puuid),
       ultimoSync:
         sync === null
           ? null
@@ -176,6 +185,14 @@ export function estado(db: Db, now: number = Date.now()): Estado {
       archivo: key.envPath,
     },
     pendientesTotal,
+    corteDeTagueo:
+      corte === null
+        ? null
+        : {
+            at: corte.at,
+            setAt: corte.setAt,
+            dejadasAtras: cuentas.reduce((n, c) => n + c.dejadasAtras, 0),
+          },
     acciones,
   };
 }
@@ -246,6 +263,25 @@ export function pendientes(
     deLaSesion: todas.filter((p) => now - p.terminoAt <= VENTANA_SESION_MS),
     atrasadas: todas.filter((p) => now - p.terminoAt > VENTANA_SESION_MS),
   };
+}
+
+/**
+ * Takes the decision to stop asking about everything played so far.
+ *
+ * It writes a DATE, not a deletion: the games stay in the cache, `abandonedByCutoff` keeps
+ * counting them, and any analysis that wants the whole backlog can still ask for it. What
+ * changes is what the panel demands of him, which is the thing that was wrong — a hundred games
+ * he does not remember cannot be tagged honestly, and an urgent action that can never be
+ * completed trains him to ignore the urgent actions that can.
+ */
+export function dejarAtras(
+  db: Db,
+  now: number = Date.now(),
+): { corte: number; dejadasAtras: number } {
+  const cutoff = setTagCutoff(db, now, now);
+  let dejadas = 0;
+  for (const account of listAccounts(db)) dejadas += abandonedByCutoff(db, account.puuid);
+  return { corte: cutoff.at, dejadasAtras: dejadas };
 }
 
 /**

@@ -216,3 +216,16 @@ CREATE TABLE IF NOT EXISTS game_tags (
 );
 
 CREATE INDEX IF NOT EXISTS game_tags_puuid ON game_tags (puuid, tagged_at DESC);
+
+-- Small key/value store for DECISIONS that change what the engine asks him for.
+--
+-- It exists for one of them: `tag_cutoff`. He decided on 2026-08-19 not to tag the games that
+-- were already in the cache — tagging a two-week-old game is memory, not observation, which is
+-- the exact distinction ADR-015 draws — and a backlog that can never be cleared turns the
+-- panel's one urgent action into permanent noise. Recording it as a dated decision keeps the
+-- untagged games visible as a stated choice instead of silently filtering them away.
+CREATE TABLE IF NOT EXISTS settings (
+  key    TEXT PRIMARY KEY,
+  value  TEXT NOT NULL,
+  set_at INTEGER NOT NULL
+);

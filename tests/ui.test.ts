@@ -15,6 +15,7 @@ import {
   abrirSesion,
   cerrarSesion,
   cobertura,
+  dejarAtras,
   estado,
   graficos,
   ledger,
@@ -540,5 +541,51 @@ describe('abrir el navegador en Windows', () => {
     const url = 'http://127.0.0.1:4477/?t=KxI6hqfMEpGFO0XzcI6lIGKJ8H2CwY9E';
     expect(escapeForCmd(url)).toBe(url);
     expect(escapeForCmd(url)).not.toContain('"');
+  });
+});
+
+describe('dejar atrás el backlog', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'smurf-puuid',
+      gameName: 'LegendofTorcuato',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+  });
+
+  it('takes the decision, reports its cost and stops demanding the impossible', () => {
+    seedGame(db, 'LA2_A', CREATION);
+    seedGame(db, 'LA2_B', CREATION + HOUR);
+    expect(estado(db).acciones.map((a) => a.id)).toContain('taguear');
+
+    const now = CREATION + 100 * HOUR;
+    const result = dejarAtras(db, now);
+    expect(result.dejadasAtras).toBe(2);
+
+    const after = estado(db, now);
+    expect(after.pendientesTotal).toBe(0);
+    expect(after.acciones.map((a) => a.id)).not.toContain('taguear');
+    // The games did not disappear: the panel says how many were left, and when it was decided.
+    expect(after.cuentas[0]?.dejadasAtras).toBe(2);
+    expect(after.corteDeTagueo).toEqual({ at: now, setAt: now, dejadasAtras: 2 });
+  });
+
+  it('leaves the games played after the decision fully askable', () => {
+    seedGame(db, 'LA2_OLD', CREATION);
+    const now = CREATION + 100 * HOUR;
+    dejarAtras(db, now);
+
+    seedGame(db, 'LA2_NEXT', now + HOUR);
+    const after = estado(db, now + 3 * HOUR);
+    expect(after.pendientesTotal).toBe(1);
+    expect(after.acciones.map((a) => a.id)).toContain('taguear');
+    expect(pendientes(db, 'smurf', now + 3 * HOUR).deLaSesion.map((p) => p.matchId)).toEqual([
+      'LA2_NEXT',
+    ]);
   });
 });

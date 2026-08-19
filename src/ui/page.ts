@@ -150,6 +150,9 @@ function renderCuentas(cuentas) {
       card.append(row);
     };
     add('sin taguear', String(c.pendientes));
+    // Stated, not hidden: the decision left these behind and the panel says how many, so the
+    // number never quietly becomes "there was nothing there".
+    if (c.dejadasAtras > 0) add('dejadas atrás', String(c.dejadasAtras) + ' (a propósito)');
     add(
       'último sync',
       c.ultimoSync === null
@@ -273,7 +276,25 @@ async function renderPendientes() {
       viejas.append(nota);
       for (const p of atrasadas) viejas.append(tarjetaPartida(p, refrescarTodo));
     };
-    box.append(abrir, viejas);
+    // The other honest answer to a backlog, and the one he actually gave: he does not remember
+    // those games. It writes a dated decision, it does not delete anything, and the panel stops
+    // demanding something that cannot be done well.
+    const dejar = el('button', null, 'No las voy a taguear');
+    dejar.onclick = async () => {
+      dejar.disabled = true;
+      dejar.textContent = 'anotando…';
+      try {
+        const r = await post('/api/dejar-atras');
+        refrescarTodo();
+        alert('Anotado: ' + r.dejadasAtras + ' partida(s) quedan sin taguear a propósito. ' +
+          'Las que juegues de ahora en más aparecen acá.');
+      } catch (e) {
+        dejar.disabled = false;
+        dejar.textContent = 'No las voy a taguear';
+        alert('No se pudo: ' + e.message);
+      }
+    };
+    box.append(abrir, dejar, viejas);
   }
 
   renderTilt();

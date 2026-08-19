@@ -10,6 +10,7 @@ import {
   abrirSesion,
   cerrarSesion,
   cobertura,
+  dejarAtras,
   estado,
   graficos,
   ledger,
@@ -251,6 +252,10 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
           sesion: numOrNull(body, 'sesion'),
         }),
       );
+      return;
+    }
+    if (url.pathname === '/api/dejar-atras' && request.method === 'POST') {
+      json(response, 200, dejarAtras(db));
       return;
     }
     if (url.pathname === '/api/sesion/cerrar' && request.method === 'POST') {

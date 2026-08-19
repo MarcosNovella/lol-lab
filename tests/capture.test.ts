@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  abandonedByCutoff,
   CaptureError,
   closeSession,
+  getTagCutoff,
   openSession,
   peerComparable,
+  setTagCutoff,
   splitByTag,
   TAG_PROVENANCE,
   type TaggedRow,
@@ -176,5 +179,70 @@ describe('capture', () => {
       const field: keyof TaggedRow = peerComparable('win');
       expect(field).toBe('win');
     });
+  });
+});
+
+describe('the tag cutoff', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'me',
+      gameName: 'LegendofTorcuato',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+  });
+
+  // Games last 1800s in this fixture, so a game created at T ends at T + 1_800_000.
+  const OLD = CREATION;
+  const RECENT = CREATION + 10 * 24 * 60 * MINUTE;
+
+  it('stops asking about games that ENDED before the decision', () => {
+    seed(db, 'LA2_OLD', { at: OLD });
+    seed(db, 'LA2_NEW', { at: RECENT });
+
+    expect(untaggedGames(db, 'me').map((g) => g.matchId)).toEqual(['LA2_NEW', 'LA2_OLD']);
+    setTagCutoff(db, RECENT);
+    expect(untaggedGames(db, 'me').map((g) => g.matchId)).toEqual(['LA2_NEW']);
+  });
+
+  it('keeps a game that was still being played when the decision was taken', () => {
+    // Created ten minutes before the cutoff, so it ENDS twenty minutes after it. He can still
+    // report on a game he is in the middle of; the cutoff is about memory, not about start times.
+    seed(db, 'LA2_RUNNING', { at: RECENT - 10 * MINUTE });
+    setTagCutoff(db, RECENT);
+    expect(untaggedGames(db, 'me').map((g) => g.matchId)).toEqual(['LA2_RUNNING']);
+  });
+
+  it('counts what it left behind instead of pretending those games are gone', () => {
+    seed(db, 'LA2_A', { at: OLD });
+    seed(db, 'LA2_B', { at: OLD + 60 * MINUTE });
+    seed(db, 'LA2_C', { at: RECENT });
+
+    expect(abandonedByCutoff(db, 'me')).toBe(0);
+    setTagCutoff(db, RECENT);
+    expect(abandonedByCutoff(db, 'me')).toBe(2);
+    // And they are still reachable for anything that deliberately wants the whole backlog.
+    expect(untaggedGames(db, 'me', { ignoreCutoff: true })).toHaveLength(3);
+  });
+
+  it('does not count an old game he DID tag as left behind', () => {
+    seed(db, 'LA2_A', { at: OLD });
+    seed(db, 'LA2_B', { at: OLD + 60 * MINUTE });
+    tagGame(db, { matchId: 'LA2_A', puuid: 'me', tag: 'mía' }, OLD + 120 * MINUTE);
+
+    setTagCutoff(db, RECENT);
+    expect(abandonedByCutoff(db, 'me')).toBe(1);
+  });
+
+  it('records WHEN the decision was taken, and the last one wins', () => {
+    const first = setTagCutoff(db, RECENT, RECENT + MINUTE);
+    expect(getTagCutoff(db)).toEqual(first);
+    const second = setTagCutoff(db, RECENT + 1000, RECENT + 2 * MINUTE);
+    expect(getTagCutoff(db)).toEqual(second);
+    expect(second.setAt).toBeGreaterThan(first.setAt);
   });
 });

@@ -173,14 +173,87 @@ export function tagGame(
   ).run(input.matchId, input.puuid, input.sessionId ?? null, input.tag, now);
 }
 
+// --------------------------------------------------------------------------- the cutoff
+
+const TAG_CUTOFF = 'tag_cutoff';
+
+export type TagCutoff = {
+  /** Games that ENDED before this are not asked about again. */
+  at: number;
+  /** When the decision was taken. */
+  setAt: number;
+};
+
+/**
+ * The dated decision not to tag what is already in the cache.
+ *
+ * Marcos took it on 2026-08-19 with 81 games untagged: he does not remember games from two
+ * weeks ago, and ADR-015 already says a tag typed from memory is a different measurement from
+ * one typed after the session. The alternative was worse in both directions — leaving the
+ * backlog pending makes the panel's one urgent action permanently unachievable, and quietly
+ * dropping old games would hide the choice inside a query.
+ *
+ * It is compared against the game's END, like the tag lag is, and NOT against `gameCreation`:
+ * a game that was running when he took the decision is a game he can still report on.
+ */
+export function getTagCutoff(db: Db): TagCutoff | null {
+  const row = db.prepare('SELECT value, set_at FROM settings WHERE key = ?').get(TAG_CUTOFF) as
+    | Record<string, unknown>
+    | undefined;
+  if (row === undefined) return null;
+  return { at: Number(row['value']), setAt: Number(row['set_at']) };
+}
+
+/** Records the decision. Last write wins, and `set_at` says when it was taken. */
+export function setTagCutoff(db: Db, at: number, now: number = Date.now()): TagCutoff {
+  db.prepare(
+    `INSERT INTO settings (key, value, set_at) VALUES (?, ?, ?)
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value, set_at = excluded.set_at`,
+  ).run(TAG_CUTOFF, String(at), now);
+  return { at, setAt: now };
+}
+
+/**
+ * How many games the cutoff is leaving behind, for this account.
+ *
+ * Reported, never hidden: `capture` already counts untagged games instead of folding them in,
+ * and a decision to stop asking about them does not make them stop existing.
+ */
+export function abandonedByCutoff(db: Db, puuid: string): number {
+  const cutoff = getTagCutoff(db);
+  if (cutoff === null) return 0;
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n
+         FROM participants p
+         JOIN matches m ON m.match_id = p.match_id
+        WHERE p.puuid = ?
+          AND m.game_creation + m.game_duration * 1000 < ?
+          AND m.game_duration >= 300
+          AND p.team_position <> ''
+          AND NOT EXISTS (
+                SELECT 1 FROM game_tags t
+                 WHERE t.match_id = p.match_id AND t.puuid = p.puuid)`,
+    )
+    .get(puuid, cutoff.at) as Record<string, unknown>;
+  return Number(row['n']);
+}
+
 // --------------------------------------------------------------------------- reading
 
-/** The games this account has played that carry no tag yet, newest first. */
+/**
+ * The games this account has played that carry no tag yet, newest first.
+ *
+ * Games that ended before the tag cutoff are excluded — that is the decision, not a filter that
+ * anyone can forget about, and `abandonedByCutoff` counts what it costs. Pass
+ * `ignoreCutoff: true` only to look at the whole backlog deliberately.
+ */
 export function untaggedGames(
   db: Db,
   puuid: string,
-  options: { since?: number; limit?: number } = {},
+  options: { since?: number; limit?: number; ignoreCutoff?: boolean } = {},
 ): { matchId: string; endedAt: number; win: boolean; champion: string }[] {
+  const cutoff = options.ignoreCutoff === true ? null : getTagCutoff(db);
   const since = options.since ?? 0;
   const limit = options.limit ?? 50;
   const rows = db
@@ -191,6 +264,9 @@ export function untaggedGames(
          JOIN matches m ON m.match_id = p.match_id
         WHERE p.puuid = ?
           AND m.game_creation >= ?
+          -- The cutoff is on the game's END, so a game that was still running when the decision
+          -- was taken stays askable. 0 is "no decision", which admits everything.
+          AND m.game_creation + m.game_duration * 1000 >= ?
           -- Same remake rule queryParticipants applies: duration >= 300s, a real position.
           -- A 68-second remake has no result to attribute, and asking him to tag one teaches
           -- the ritual that some of its questions are noise.
@@ -202,7 +278,7 @@ export function untaggedGames(
         ORDER BY m.game_creation DESC
         LIMIT ?`,
     )
-    .all(puuid, since, limit) as Record<string, unknown>[];
+    .all(puuid, since, cutoff?.at ?? 0, limit) as Record<string, unknown>[];
   return rows.map((r) => ({
     matchId: String(r['match_id']),
     endedAt: Number(r['ended_at']),
