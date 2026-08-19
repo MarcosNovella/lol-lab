@@ -135,6 +135,8 @@ td { padding: 3px 8px 3px 0; border-top: 1px solid var(--line); }
 .tarea button { flex: none; }
 .tarea input { width: 100%; }
 .accion button { flex: none; align-self: center; }
+.selector { display: flex; gap: 8px; margin-bottom: 18px; }
+.selector:empty { display: none; }
 .anotado { color: var(--warn); font-size: 12px; margin-top: 8px; }
 input { font: inherit; color: var(--ink); background: #0b0d11; border: 1px solid var(--line);
         border-radius: 7px; padding: 6px 10px; width: 150px; }
@@ -157,7 +159,21 @@ ${SVG_STYLE}
  */
 export const CLIENT_SCRIPT = `
 const TOKEN = new URLSearchParams(location.search).get('t');
-const api = (path) => fetch(path + (path.includes('?') ? '&' : '?') + 't=' + TOKEN)
+
+/* La cuenta que se está mirando. El panel entero estaba cableado a 'smurf', así que la main
+   —la que es en serio desde la partida uno— no se veía por ningún lado salvo en su tarjeta.
+   Se resuelve en arrancar() contra las cuentas que existen de verdad, nunca a un nombre fijo. */
+let CUENTA = null;
+
+const conCuenta = (path) => {
+  const sep = path.includes('?') ? '&' : '?';
+  const base = path + sep + 't=' + TOKEN;
+  /* Las rutas globales la ignoran, así que mandarla siempre no rompe nada y evita tener que
+     mantener a mano una lista de cuáles la llevan. */
+  return CUENTA === null ? base : base + '&cuenta=' + encodeURIComponent(CUENTA);
+};
+
+const api = (path) => fetch(conCuenta(path))
   .then(async (r) => {
     const body = await r.json();
     if (!r.ok) throw new Error(body.error || r.statusText);
@@ -184,6 +200,24 @@ const el = (tag, cls, text) => {
   if (text !== undefined) node.textContent = text;
   return node;
 };
+
+function renderSelector(cuentas) {
+  const box = document.getElementById('selector');
+  box.replaceChildren();
+  /* Con una sola cuenta el selector es ruido: no hay nada que elegir. */
+  if (cuentas.length < 2) return;
+  for (const c of cuentas) {
+    const b = el('button', c.label === CUENTA ? 'on' : null, c.label);
+    b.onclick = () => {
+      if (c.label === CUENTA) return;
+      CUENTA = c.label;
+      /* Sobrevive al reinicio: el token cambia en cada arranque, la cuenta elegida no debería. */
+      try { localStorage.setItem('lol.cuenta', CUENTA); } catch (e) { /* modo privado */ }
+      pintarTodo();
+    };
+    box.append(b);
+  }
+}
 
 function renderAcciones(acciones) {
   const box = document.getElementById('acciones');
@@ -328,7 +362,7 @@ function campoKey() {
   return fila;
 }
 
-const post = (path, body) => fetch(path + (path.includes('?') ? '&' : '?') + 't=' + TOKEN, {
+const post = (path, body) => fetch(conCuenta(path), {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify(body || {}),
@@ -495,7 +529,7 @@ function renderSync() {
 
     // EventSource cannot send headers, which is exactly why the token lives in the query string
     // rather than in an Authorization header.
-    const src = new EventSource('/api/sync?t=' + TOKEN + '&cuenta=smurf');
+    const src = new EventSource(conCuenta('/api/sync'));
     src.onmessage = (msg) => {
       const e = JSON.parse(msg.data);
       if (e.tipo === 'inicio') log.textContent = 'sincronizando ' + e.cuenta + '…';
@@ -697,7 +731,7 @@ async function renderCobertura() {
 function correrTarea(que, boton, salida, alTerminar) {
   boton.disabled = true;
   salida.textContent = 'trabajando…';
-  const src = new EventSource('/api/tarea?t=' + TOKEN + '&que=' + que);
+  const src = new EventSource(conCuenta('/api/tarea?que=' + encodeURIComponent(que)));
   src.onmessage = (msg) => {
     const e = JSON.parse(msg.data);
     if (e.tipo === 'progreso') salida.textContent = e.detalle;
@@ -838,25 +872,76 @@ async function renderLectura() {
     'está el número del rival al lado del tuyo y no la diferencia sola. ' +
     'Sale de ' + l.conTimeline + ' partidas con timeline en caché.'));
 
+  // El reparto por tag. NO se dibuja hasta que exista el primer tag: una sección con tres ceros
+  // se lee como "no pasa nada acá" en vez de "todavía no hay nada que leer".
+  if (l.tags) {
+    const t = el('div', 'card');
+    t.append(el('div', 'porque', 'Según a quién se la atribuiste vos'));
+    const ETIQUETAS = {
+      'mía': 'la produje yo',
+      'igual': 'salía igual',
+      'pareja': 'estuvo pareja',
+    };
+    for (const p of l.tags.poblaciones) {
+      const fila = el('div', 'champ');
+      fila.append(el('div', 'nombre', ETIQUETAS[p.tag] || p.tag));
+      // Sin barra cuando no hay tasa que enunciar: dibujar la proporción sería decir con una
+      // forma lo que acabamos de negarnos a decir con un número.
+      const wr = el('div', 'wr');
+      if (p.winrate !== null) {
+        const relleno = el('span');
+        relleno.style.width = p.winrate + '%';
+        wr.append(relleno);
+      }
+      fila.append(wr);
+      fila.append(el('div', 'num', p.n === 0
+        ? 'sin partidas'
+        : p.victorias + 'W-' + (p.n - p.victorias) + 'L' +
+          (p.winrate === null ? '' : ' · ' + p.winrate + '%')));
+      t.append(fila);
+    }
+    box.append(t);
+
+    const faltan = l.tags.poblaciones.filter((p) => p.n > 0 && p.winrate === null).length;
+    box.append(el('div', 'guardada',
+      l.tags.tagueadas + ' tagueadas · ' + l.tags.sinTaguear + ' sin taguear, que NO se ' +
+      'reparten adentro: si se cayeran, cada porcentaje de acá sería en realidad "de las que ' +
+      'me acordé de taguear".' +
+      (faltan > 0
+        ? ' ' + faltan + ' de los tres grupos todavía no llegan a ' + l.tags.minimo +
+          ' partidas, así que va el crudo y no un porcentaje que parece confiable.'
+        : '')));
+  }
+
   if (l.campeones.length > 0) {
     const champs = el('div', 'card');
     champs.append(el('div', 'porque', 'Tus campeones en esas partidas'));
+    let algunoChico = false;
     for (const c of l.campeones) {
       const fila = el('div', 'champ');
       const foto = cara(c.campeon);
       if (foto) fila.append(foto);
       fila.append(el('div', 'nombre', c.campeon));
+      const suficiente = c.partidas >= l.minimo;
+      if (!suficiente) algunoChico = true;
       const wr = el('div', 'wr');
-      const relleno = el('span');
-      relleno.style.width = Math.round((c.victorias / c.partidas) * 100) + '%';
-      wr.append(relleno);
+      if (suficiente) {
+        const relleno = el('span');
+        relleno.style.width = Math.round((c.victorias / c.partidas) * 100) + '%';
+        wr.append(relleno);
+      }
       fila.append(wr);
       fila.append(el('div', 'num',
-        c.victorias + 'W-' + (c.partidas - c.victorias) + 'L · ' +
-        Math.round((c.victorias / c.partidas) * 100) + '%'));
+        c.victorias + 'W-' + (c.partidas - c.victorias) + 'L' +
+        (suficiente ? ' · ' + Math.round((c.victorias / c.partidas) * 100) + '%' : '')));
       champs.append(fila);
     }
     box.append(champs);
+    if (algunoChico) {
+      box.append(el('div', 'guardada',
+        'Los campeones con menos de ' + l.minimo + ' partidas van sin porcentaje y sin barra: ' +
+        '3W-0L y 30W-0L no son la misma afirmación, y dibujadas se ven igual.'));
+    }
   }
 }
 
@@ -958,13 +1043,21 @@ function renderPrep() {
   };
 }
 
+let estadoActual = null;
+
+function pintarEstado(e) {
+  renderAcciones(e.acciones);
+  renderCuentas(e.cuentas);
+  renderKey(e.key);
+  renderSelector(e.cuentas);
+  document.getElementById('error').textContent = '';
+}
+
 async function refrescar() {
   try {
     const e = await api('/api/estado');
-    renderAcciones(e.acciones);
-    renderCuentas(e.cuentas);
-    renderKey(e.key);
-    document.getElementById('error').textContent = '';
+    estadoActual = e;
+    pintarEstado(e);
   } catch (err) {
     document.getElementById('error').textContent = 'Error: ' + err.message;
   }
@@ -974,17 +1067,45 @@ const fallar = (err) => {
   document.getElementById('error').textContent = 'Error: ' + err.message;
 };
 
-refrescar();
-renderSync();
-renderPrep();
-renderLectura().catch(fallar);
-renderAntes().catch(fallar);
-renderUpkeep().catch(fallar);
-renderPendientes().catch(fallar);
-renderMomentos().catch(fallar);
-renderGraficos().catch(fallar);
-renderCobertura().catch(fallar);
-renderLedger().catch(fallar);
+/* Todo lo que depende de qué cuenta se está mirando. Se vuelve a pintar al cambiarla. */
+function pintarTodo() {
+  renderSelector(estadoActual ? estadoActual.cuentas : []);
+  renderSync();
+  renderPrep();
+  renderLectura().catch(fallar);
+  renderAntes().catch(fallar);
+  renderUpkeep().catch(fallar);
+  renderPendientes().catch(fallar);
+  renderMomentos().catch(fallar);
+  renderGraficos().catch(fallar);
+  renderCobertura().catch(fallar);
+  renderLedger().catch(fallar);
+}
+
+/* El orden importa: hasta saber qué cuentas existen no se puede pedir nada con cuenta, y
+   pedirlo con una que no existe devuelve 404 en todas las secciones a la vez. */
+async function arrancar() {
+  try {
+    const e = await api('/api/estado');
+    estadoActual = e;
+    const guardada = (() => {
+      try { return localStorage.getItem('lol.cuenta'); } catch (err) { return null; }
+    })();
+    const existe = e.cuentas.some((c) => c.label === guardada);
+    /* Sin elección guardada, la que sincronizaste último: es la que venís jugando. Tomar la
+       primera de la lista es alfabético, o sea azar con cara de decisión. */
+    const porActividad = [...e.cuentas].sort(
+      (a, b) => (b.ultimoSync ? b.ultimoSync.at : 0) - (a.ultimoSync ? a.ultimoSync.at : 0),
+    );
+    CUENTA = existe ? guardada : (porActividad.length > 0 ? porActividad[0].label : null);
+    pintarEstado(e);
+    pintarTodo();
+  } catch (err) {
+    fallar(err);
+  }
+}
+
+arrancar();
 // Every 60s, and only the panel — it reads the database and spends no Riot request, so polling
 // it cannot eat the rate limit the sync needs.
 // The poll refreshes the PANEL and deliberately not the tagging list. Re-rendering that list
@@ -1017,6 +1138,7 @@ El token cambia en cada arranque, así que un favorito viejo no sirve.</p>
   <h1>lol</h1>
   <p class="sub">Local, en tu máquina. Nada de esto sale de acá.</p>
   <div id="error" class="dim"></div>
+  <div id="selector" class="selector"></div>
 
   <div id="acciones"></div>
 

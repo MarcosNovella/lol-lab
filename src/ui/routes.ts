@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { benchmark, mostPlayedRole, roleLabel } from '../analysis/benchmark.ts';
+import { benchmark, MIN_GAMES, mostPlayedRole, roleLabel } from '../analysis/benchmark.ts';
 import { type Accion, type Briefing, runway } from '../analysis/briefing.ts';
 import {
   abandonedByCutoff,
@@ -8,9 +8,11 @@ import {
   getTagCutoff,
   openSession,
   setTagCutoff,
+  splitByTag,
   TAGS,
   type Tag,
   tagGame,
+  taggedRows,
   tagOf,
   untaggedGames,
 } from '../analysis/capture.ts';
@@ -841,11 +843,38 @@ export type Lectura = {
   /** Cuántas quedaron afuera por estar contaminadas, para que el silencio no sea invisible. */
   contaminadas: number;
   campeones: { campeon: string; partidas: number; victorias: number }[];
+  /**
+   * A partir de cuántas partidas se puede enunciar una tasa.
+   *
+   * Uno solo para toda la pantalla, y el que el motor ya usa: si una tasa no se puede decir,
+   * tampoco se puede DIBUJAR. Una barra al 50% sobre 2 partidas se ve igual de sólida que una
+   * sobre 50, y el ojo la lee antes que al número que está al lado.
+   */
+  minimo: number;
   /** Las tres fases contra el rival de línea, ya dibujadas. */
   fasesSvg: string;
   /** Cuántas de las partidas leídas tenían timeline: sin él no hay fases. */
   conTimeline: number;
+  /** null hasta que exista el primer tag: la sección no se dibuja vacía. */
+  tags: RepartoPorTag | null;
   notas: string[];
+};
+
+export type RepartoPorTag = {
+  poblaciones: {
+    tag: Tag;
+    n: number;
+    victorias: number;
+    /** null cuando n es demasiado chico para enunciar una tasa sin que parezca confiable. */
+    winrate: number | null;
+    /** Mediana de lo que tardó en taguear, en ms. NaN si la población está vacía. */
+    demoraMedianaMs: number;
+  }[];
+  tagueadas: number;
+  /** Nunca se doblan adentro: si se cayeran, cada tasa sería condicional a "las que taguéo". */
+  sinTaguear: number;
+  /** A partir de cuántas partidas se enuncia una tasa. */
+  minimo: number;
 };
 
 /** Formatea un valor con la unidad que declara la métrica, sin inventar precisión. */
@@ -932,6 +961,30 @@ export function lectura(db: Db, cuenta: string, limite = 40): Lectura {
   }
   const fases = phaseAverages(porPartida);
 
+  // El reparto por tag: lo único que separa "jugué mal" de "me tocó mal", y lo único acá que no
+  // sale de la API sino de él. Se compara contra el RESULTADO, nunca contra los otros jugadores:
+  // no existe el tag del rival, así que una comparación con pares tendría un lado vacío y
+  // devolvería un número igual (`peerComparable` lo prohíbe por construcción).
+  const filas = taggedRows(db, puuid);
+  const reparto = splitByTag(filas, untaggedGames(db, puuid, { limit: 500 }).length);
+  const tags: RepartoPorTag | null =
+    reparto.tagged === 0
+      ? null
+      : {
+          poblaciones: reparto.populations.map((p) => ({
+            tag: p.tag,
+            n: p.n,
+            victorias: p.wins,
+            // Una tasa sobre 3 partidas se lee tan segura como una sobre 300 y no lo es. Se usa
+            // el mismo mínimo que el benchmark ya aplica, no uno inventado para esta pantalla.
+            winrate: p.n >= MIN_GAMES ? Math.round((p.wins / p.n) * 100) : null,
+            demoraMedianaMs: p.medianLagMs,
+          })),
+          tagueadas: reparto.tagged,
+          sinTaguear: reparto.untagged,
+          minimo: MIN_GAMES,
+        };
+
   return {
     cuenta: label,
     rol: result.role === 'todos' ? 'todos los roles' : roleLabel(result.role),
@@ -977,6 +1030,8 @@ export function lectura(db: Db, cuenta: string, limite = 40): Lectura {
       })),
     ),
     conTimeline,
+    minimo: MIN_GAMES,
+    tags,
     notas: result.notes,
   };
 }

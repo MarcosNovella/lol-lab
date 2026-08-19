@@ -2,6 +2,7 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { MIN_GAMES } from '../src/analysis/benchmark.ts';
 import { tagGame, tagOf } from '../src/analysis/capture.ts';
 import { flattenMatch } from '../src/analysis/flatten.ts';
 import { escapeForCmd } from '../src/cli/ui.ts';
@@ -748,5 +749,93 @@ describe('la lectura — qué estoy fallando y qué hago bien', () => {
     const total = l.campeones.reduce((n, c) => n + c.partidas, 0);
     expect(total).toBe(l.partidas);
     expect(l.victorias + l.derrotas).toBe(l.partidas);
+  });
+});
+
+describe('el reparto por tag en la lectura', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'me',
+      gameName: 'LegendofTorcuato',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+    for (let i = 0; i < 8; i++) {
+      const raw = lobby({ matchId: `LA2_T${i}`, index: i, win: i % 2 === 0 });
+      raw.info.queueId = 420;
+      saveMatch(db, flattenMatch(raw), raw);
+    }
+  });
+
+  it('no existe hasta que haya un tag, en vez de mostrar tres ceros', () => {
+    // Una sección con todo en cero se lee como "acá no pasa nada", que es lo contrario de
+    // "todavía no hay nada que leer". Su backlog se cerró por decisión (ADR-019), así que este
+    // es exactamente su estado hasta que tague la primera.
+    expect(lectura(db, 'smurf').tags).toBeNull();
+  });
+
+  it('aparece con el primer tag y nunca dobla adentro las que faltan taguear', () => {
+    tagGame(db, { matchId: 'LA2_T0', puuid: 'me', tag: 'mía' });
+    const t = lectura(db, 'smurf').tags;
+    expect(t?.tagueadas).toBe(1);
+    // Las 7 restantes se reportan aparte: si se cayeran, cada tasa sería condicional a
+    // "las partidas que se acordó de taguear", y acordarse no es independiente de cómo salió.
+    expect(t?.sinTaguear).toBe(7);
+  });
+
+  it('NO enuncia un porcentaje con muestra chica, pero sí el crudo', () => {
+    for (const id of ['LA2_T0', 'LA2_T1', 'LA2_T2']) {
+      tagGame(db, { matchId: id, puuid: 'me', tag: 'mía' });
+    }
+    const mia = lectura(db, 'smurf').tags?.poblaciones.find((p) => p.tag === 'mía');
+    expect(mia?.n).toBe(3);
+    // 2 de 3 se lee igual de seguro que 200 de 300 y no lo es.
+    expect(mia?.winrate).toBeNull();
+    expect(mia?.victorias).toBeGreaterThanOrEqual(0);
+  });
+
+  it('enuncia la tasa recién al llegar al mínimo que el motor ya usa', () => {
+    for (const id of ['LA2_T0', 'LA2_T1', 'LA2_T2', 'LA2_T3', 'LA2_T4']) {
+      tagGame(db, { matchId: id, puuid: 'me', tag: 'igual' });
+    }
+    const t = lectura(db, 'smurf').tags;
+    const igual = t?.poblaciones.find((p) => p.tag === 'igual');
+    expect(igual?.n).toBe(t?.minimo);
+    expect(igual?.winrate).not.toBeNull();
+  });
+
+  it('devuelve los tres grupos aunque dos estén vacíos', () => {
+    tagGame(db, { matchId: 'LA2_T0', puuid: 'me', tag: 'pareja' });
+    const t = lectura(db, 'smurf').tags;
+    expect(t?.poblaciones.map((p) => p.tag)).toEqual(['mía', 'igual', 'pareja']);
+    expect(t?.poblaciones.filter((p) => p.n === 0)).toHaveLength(2);
+  });
+});
+
+describe('el mínimo de muestra vale para toda la lectura', () => {
+  it('expone UN mínimo, el que el motor ya usa, y no uno inventado para la pantalla', () => {
+    const db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'me',
+      gameName: 'LegendofTorcuato',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+    for (let i = 0; i < 8; i++) {
+      const raw = lobby({ matchId: `LA2_U${i}`, index: i, win: i % 2 === 0 });
+      raw.info.queueId = 420;
+      saveMatch(db, flattenMatch(raw), raw);
+    }
+    const l = lectura(db, 'smurf');
+    // Un solo número para el porcentaje de un tag, el de un campeón y la barra de los dos: si
+    // una tasa no se puede enunciar, tampoco se puede dibujar, y dos umbrales distintos en la
+    // misma pantalla serían dos criterios de honestidad distintos.
+    expect(l.minimo).toBe(MIN_GAMES);
+    db.close();
   });
 });

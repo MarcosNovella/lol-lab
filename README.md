@@ -82,6 +82,17 @@ afuera**: su promedio está dominado por las partidas que ganaste, así que sirv
 no para encabezar nada. Si ninguna métrica se destaca de verdad, no titula nada en vez de
 inventar un titular.
 
+Si el panel encuentra más de una cuenta, arriba de todo hay un **selector**: arranca en la que
+sincronizaste último y se acuerda de cuál elegiste. El récord nunca se mezcla entre cuentas.
+
+Cuando empieces a taguear aparece **el reparto por tag**: de las partidas que marcaste como "la
+produje yo", cuántas ganaste, y lo mismo para las otras dos. Es lo único de esa pantalla que sale
+de vos y no de la API. Las que quedan sin taguear se cuentan al lado y no se reparten adentro: si
+se cayeran, cada porcentaje sería en realidad "de las que me acordé de taguear".
+
+Nada de esa pantalla enuncia un porcentaje —ni dibuja una barra— con menos de 5 partidas. 3W-0L y
+30W-0L no son la misma afirmación, y dibujadas se ven igual.
+
 También están **las tres fases** —línea, medio y cierre— con tu CS por minuto contra el de tu
 rival en cada una. Ojo con leerlas como habilidad después del minuto 14: el que va ganando rota y
 farmea menos, así que una ventaja que se achica puede ser exactamente lo que estás haciendo bien.

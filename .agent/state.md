@@ -377,10 +377,34 @@ verify verde, 329 tests.
 
 verify verde, 334 tests.
 
-### Lo que la lectura TODAVÍA no muestra, y por qué
-- **El reparto por tag** ("cuando decís que la produjiste vos, ¿cuánto perdés?") es la respuesta
-  más directa a "qué patrón no repetir", y hoy mostraría cero: el backlog se cerró por decisión
-  (ADR-019) y el tagueo arranca con la próxima partida. Vale la pena recién con unas semanas.
+### S9e — el reparto por tag, y el panel deja de estar cableado a una cuenta
+
+- **El reparto por tag está en la lectura** (ADR-028) y **NO se dibuja hasta que exista el primer
+  tag**: una sección con tres ceros se lee como "acá no pasa nada" en vez de "todavía no hay nada
+  que leer", y con el backlog cerrado por decisión ese es su estado por semanas.
+- Se compara contra el RESULTADO y nunca contra otros jugadores: no existe el tag del rival, así
+  que una comparación con pares tendría un lado vacío y devolvería un número igual —
+  `peerComparable` ya lo prohíbe por construcción.
+- Las sin taguear se reportan al lado y NUNCA se doblan adentro: si se cayeran, cada tasa sería
+  en realidad "de las que se acordó de taguear", y acordarse no es independiente de cómo salió.
+- **Un solo mínimo para toda la pantalla**, el `MIN_GAMES` que el benchmark ya usa: vale para el
+  porcentaje de un tag, el de un campeón y la barra de los dos.
+- **G-033**: y ahí estaba el defecto. El código se negaba correctamente a enunciar el porcentaje
+  bajo el mínimo y dibujaba la barra igual, así que "salía igual · 1W-1L" pintaba media barra tan
+  sólida como una sobre cincuenta partidas, y Ahri con 3W-0L pintaba la barra ENTERA. Escrito en
+  la misma sesión que la guarda que retiene el número. Ningún test lo veía: la aserción estaba
+  sobre el payload y el defecto estaba en la geometría. Se encontró mirando la captura.
+- **El panel ya no está cableado a `smurf`** (ADR-029). Toda llamada del cliente mandaba
+  `cuenta=smurf`, así que la MAIN —la que es en serio desde la partida uno— no se veía en ningún
+  lado salvo su propia tarjeta. Ahora hay selector, arranca en la cuenta sincronizada más
+  recientemente (la que viene jugando, no la primera alfabética) y la elección sobrevive al
+  reinicio.
+
+verify verde, 340 tests.
+
+### Lo que la lectura TODAVÍA no muestra
+- El reparto por tag ya está, pero **sobre su caché real va a mostrar cero** hasta que tague:
+  el backlog se cerró por decisión (ADR-019) y el tagueo arranca con su próxima partida.
 
 ## Open questions
 - **Diana**: closed by D3 as "the ledger decides", with the caveat that at n=5 needing 25, and 8
