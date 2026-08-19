@@ -70,10 +70,20 @@ sin que quede anotado.
 El acceso directo del escritorio ya está hecho y apunta acá; si alguna vez hay que rehacerlo,
 el icono es `assets/lol-lab.ico` y el destino es este `.bat` con el repo como carpeta de inicio.
 
-Abre el panel en el navegador y a partir de ahí no volvés a la terminal. Arriba te dice **qué
-hacer ahora** y por qué; abajo están el botón de sincronizar con su barra de progreso, las
-partidas sin taguear con tres botones cada una, los momentos más caros, la curva, el mapa de
-muertes, la cobertura y el ledger.
+Abre el panel en el navegador y a partir de ahí no volvés a la terminal.
+
+Lo primero que ves es **cómo venís**: el rango, el récord de las últimas partidas, qué hacés
+mejor y peor **contra tu rival de línea**, un gráfico de barras con todas las métricas y tus
+campeones con su récord. La referencia son los otros nueve jugadores de tus propias partidas, que
+Riot ya emparejó a tu MMR — no un promedio de Platino sacado de otro lado.
+
+El gráfico deja afuera las métricas contaminadas (CS/min, KDA, daño) y **te dice cuántas dejó
+afuera**: su promedio está dominado por las partidas que ganaste, así que sirven para mirar pero
+no para encabezar nada. Si ninguna métrica se destaca de verdad, no titula nada en vez de
+inventar un titular.
+
+Debajo están los momentos más caros, la curva, el mapa de muertes, el briefing de antes de jugar,
+y recién después lo operativo: sincronizar, taguear, la puesta al día y la key.
 
 El **tag** es lo único que el software no puede sacar solo, y es lo que separa "jugué mal" de
 "me tocó mal". Cada click se guarda en el momento: si cerrás la pestaña a la mitad, lo que ya

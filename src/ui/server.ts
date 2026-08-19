@@ -19,6 +19,7 @@ import {
   estado,
   graficos,
   guardarKey,
+  lectura,
   ledger,
   momentos,
   pendientes,
@@ -436,6 +437,10 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
       return;
     }
 
+    if (url.pathname === '/api/lectura') {
+      json(response, 200, lectura(db, cuenta));
+      return;
+    }
     if (url.pathname === '/api/upkeep') {
       json(response, 200, upkeep(db));
       return;

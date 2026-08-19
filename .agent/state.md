@@ -326,6 +326,39 @@ briefing de S9 no puede mostrar nada (G-029). ADR-023 y ADR-024.
 
 verify verde, 320 tests.
 
+### S9c — el panel se lee, no se opera
+
+Pedido suyo: entrar, mirar diez minutos y salir sabiendo qué está fallando, qué no repetir y
+también qué está haciendo bien, con más imágenes. ADR-025 y ADR-026.
+
+- **"Cómo venís" arriba de todo**: rango, récord de las últimas 12, qué hace mejor y peor contra
+  su rival de línea, un gráfico de barras divergentes, y sus campeones con foto y su récord. Lo
+  operativo (sincronizar, taguear, puesta al día, key) quedó agrupado abajo bajo encabezados.
+- **La lectura es `benchmark()`, que ya existía y NUNCA había estado en pantalla.** Compara contra
+  los otros nueve jugadores de sus propias partidas, que para una métrica de rol es exactamente su
+  rival de línea (ADR-002).
+- **Lo que se niega a mostrar es el punto.** Una métrica contaminada puede dibujarse pero no puede
+  encabezar (G-008), así que las 14 que quedan afuera se CUENTAN en pantalla. Y el titular se lee
+  de la `severity` que el motor ya calcula, no de "el primero de la lista" (G-032).
+- **`metricBarsSvg`**, el gráfico nuevo, en `analysis/render.ts` como todos los demás. El par de
+  colores se eligió CORRIENDO el validador, no a ojo: verde/rojo mide ΔE 7.9 bajo deuteranopía
+  contra 26.8 del azul/naranja. La posición ya codifica el signo, así que el color es redundante y
+  el gráfico se lee igual sin distinguir los colores. El largo es el tamaño del efecto, recortado
+  en ±1.5, porque una diferencia de 8 de CS y una de 0.3 de participación no comparten escala.
+- G-031: `pnpm verify` empezó a fallar sin decir por qué — el único error real estaba tapado por
+  los ~110 infos de `useLiteralKeys` ("Diagnostics not shown: 94"). El script usa
+  `--diagnostic-level=warn` ahora, y encontrarlo costó un bisect contra HEAD limpio.
+- Visto en el navegador dos veces: la primera versión cortaba la etiqueta larga
+  ("*ntaja* de oro+XP en fase de líneas"), que sin mirarlo no se veía.
+
+verify verde, 329 tests.
+
+### Lo que la lectura TODAVÍA no muestra, y por qué
+- **El reparto por tag** ("cuando decís que la produjiste vos, ¿cuánto perdés?") es la respuesta
+  más directa a "qué patrón no repetir", y hoy mostraría cero: el backlog se cerró por decisión
+  (ADR-019) y el tagueo arranca con la próxima partida. Vale la pena recién con unas semanas.
+- **Las fases** (línea / medio / cierre) están calculadas y no dibujadas.
+
 ## Open questions
 - **Diana**: closed by D3 as "the ledger decides", with the caveat that at n=5 needing 25, and 8
   games since he last played her, it may never reach n.

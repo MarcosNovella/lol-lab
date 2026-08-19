@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { benchmark, mostPlayedRole, roleLabel } from '../analysis/benchmark.ts';
 import { type Accion, type Briefing, runway } from '../analysis/briefing.ts';
 import {
   abandonedByCutoff,
@@ -23,9 +24,17 @@ import { sameChampion } from '../analysis/names.ts';
 import { confidenceOf, prepMatchup } from '../analysis/prep.ts';
 import { loadPriors, priorFor, priorsKeyedLike } from '../analysis/priors.ts';
 import { describeRank, latestSnapshot, TRACKED_QUEUES } from '../analysis/rank.ts';
-import { type DeathDot, deathMapSvg, goldCurveSvg, isOwnHalf } from '../analysis/render.ts';
+import {
+  type DeathDot,
+  deathMapSvg,
+  goldCurveSvg,
+  isOwnHalf,
+  type MetricBar,
+  metricBarsSvg,
+} from '../analysis/render.ts';
 import { assembleBriefing, PregameError } from '../pregame.ts';
 import { KeyError, keyState, writeKey } from '../riot/key.ts';
+import { QUEUE } from '../riot/types.ts';
 import type { Db } from '../store/db.ts';
 import { ASSETS_ROOT } from '../store/db.ts';
 import { catalogForPatch } from '../store/items.ts';
@@ -793,5 +802,142 @@ export function guardarKey(valor: string, now: number = Date.now()): EstadoKey {
     probablementeVencida: key.likelyExpired,
     problema: key.problem,
     archivo: key.envPath,
+  };
+}
+
+// ------------------------------------------------------------------------ la lectura
+
+export type BarraLectura = Omit<MetricBar, 'effect'> & {
+  /**
+   * `null` es NO MEDIBLE, nunca cero.
+   *
+   * Explícito porque `JSON.stringify` convierte NaN en null solo, y una conversión silenciosa
+   * acá es la misma sustitución que G-014 frena en el borde de SQLite: quien lea el número del
+   * otro lado leería "no hay diferencia" donde el motor dijo "no se puede medir". El SVG se
+   * arma acá, del lado donde el NaN todavía es NaN.
+   */
+  effect: number | null;
+  percentil: number;
+  contaminada: boolean;
+};
+
+export type Lectura = {
+  cuenta: string;
+  rol: string;
+  cola: string;
+  partidas: number;
+  victorias: number;
+  derrotas: number;
+  winrate: number;
+  ventana: { desde: number | null; hasta: number | null };
+  rango: { cola: string; texto: string; wins: number | null; losses: number | null }[];
+  /** Métricas rankeables, de peor a mejor. Las contaminadas NO entran (G-008). */
+  barras: BarraLectura[];
+  /** Ya dibujado acá y no en el navegador: el builder es del motor y se testea como tal. */
+  barrasSvg: string;
+  mejor: string | null;
+  peor: string | null;
+  /** Cuántas quedaron afuera por estar contaminadas, para que el silencio no sea invisible. */
+  contaminadas: number;
+  campeones: { campeon: string; partidas: number; victorias: number }[];
+  notas: string[];
+};
+
+/** Formatea un valor con la unidad que declara la métrica, sin inventar precisión. */
+function valor(v: number, unit: string | null): string {
+  if (!Number.isFinite(v)) return '—';
+  if (unit === '%') return `${(v * 100).toFixed(1)}%`;
+  return Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2);
+}
+
+/**
+ * Lo que él pidió: entrar, mirar diez minutos y saber qué está fallando y qué está haciendo bien.
+ *
+ * Todo sale de `benchmark()`, que compara contra los OTROS NUEVE JUGADORES de sus propias
+ * partidas (ADR-002) — en las métricas por rol, exactamente su rival de línea. No hay promedio de
+ * Platino sacado de otro lado.
+ *
+ * Lo que NO entra es tan importante como lo que entra: una métrica contaminada —CS por minuto,
+ * KDA, daño— no puede encabezar nada, porque su media está dominada por las partidas que ganó
+ * (G-008). Se cuentan y se dice cuántas quedaron afuera, para que el silencio sea visible.
+ */
+export function lectura(db: Db, cuenta: string, limite = 40): Lectura {
+  const { puuid, label } = cuentaDe(db, cuenta);
+  const rol = mostPlayedRole(db, puuid, QUEUE.soloq);
+
+  const result = benchmark(db, {
+    puuid,
+    accountLabel: label,
+    ...(rol !== null ? { role: rol } : {}),
+    queueId: QUEUE.soloq,
+    queueLabel: 'soloq',
+    limit: limite,
+  });
+
+  const rankeables = result.comparisons.filter((c) => c.rankable && c.enoughData);
+  const ordenadas = [...rankeables].sort((a, b) => a.score - b.score);
+  const paraDibujar: MetricBar[] = ordenadas.map((c) => ({
+    label: c.label,
+    effect: c.effect,
+    detail: `${valor(c.yours, c.unit)} vs ${valor(c.peerMean, c.unit)}`,
+    games: c.games,
+  }));
+  const barras: BarraLectura[] = paraDibujar.map((b, i) => {
+    const c = ordenadas[i];
+    return {
+      label: b.label,
+      detail: b.detail,
+      games: b.games,
+      effect: Number.isFinite(b.effect) ? b.effect : null,
+      percentil: c?.percentile ?? 0,
+      contaminada: c === undefined || c.contamination !== 'causal',
+    };
+  });
+
+  const campeones = new Map<string, { partidas: number; victorias: number }>();
+  for (const row of queryParticipants(db, {
+    puuid,
+    queueId: QUEUE.soloq,
+    limit: limite,
+    ...(rol !== null ? { role: rol } : {}),
+  })) {
+    const actual = campeones.get(row.champion) ?? { partidas: 0, victorias: 0 };
+    actual.partidas += 1;
+    if (row.win) actual.victorias += 1;
+    campeones.set(row.champion, actual);
+  }
+
+  return {
+    cuenta: label,
+    rol: result.role === 'todos' ? 'todos los roles' : roleLabel(result.role),
+    cola: result.queue,
+    partidas: result.games,
+    victorias: result.wins,
+    derrotas: result.games - result.wins,
+    winrate: result.winRate,
+    ventana: { desde: result.window.from, hasta: result.window.to },
+    rango: TRACKED_QUEUES.map((cola) => {
+      const snapshot = latestSnapshot(db, puuid, cola);
+      return {
+        cola,
+        texto: describeRank(snapshot),
+        wins: snapshot?.wins ?? null,
+        losses: snapshot?.losses ?? null,
+      };
+    }),
+    barras,
+    barrasSvg: metricBarsSvg(paraDibujar),
+    // El titular sale de la SEVERIDAD que el motor ya calculó, no de "el primero de la lista".
+    // Ordenada, la lista siempre tiene un primero: sobre datos donde todas las métricas empatan
+    // eso titulaba "lo que mejor hacés: Placas de torreta" con una diferencia de exactamente
+    // cero. Una etiqueta segura sobre nada es peor que no decir nada.
+    mejor: result.strongest.find((c) => c.severity === 'fuerte')?.label ?? null,
+    peor:
+      result.weakest.find((c) => c.severity === 'crítico' || c.severity === 'flojo')?.label ?? null,
+    contaminadas: result.comparisons.filter((c) => !c.rankable).length,
+    campeones: [...campeones]
+      .map(([campeon, v]) => ({ campeon, ...v }))
+      .sort((a, b) => b.partidas - a.partidas),
+    notas: result.notes,
   };
 }

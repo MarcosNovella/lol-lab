@@ -23,6 +23,7 @@ import {
   dejarAtras,
   estado,
   graficos,
+  lectura,
   ledger,
   momentos,
   olvidarMapa,
@@ -35,7 +36,7 @@ import {
   taguear,
 } from '../src/ui/routes.ts';
 import { guard, HOST, newToken, startUiOnFreePort } from '../src/ui/server.ts';
-import { match, participant } from './fixtures.ts';
+import { lobby, match, participant } from './fixtures.ts';
 
 /**
  * The UI's guards and its status panel.
@@ -670,5 +671,82 @@ describe('pegar la key desde el panel', () => {
     expect(() => writeKey('RGAPI-con espacio', tmp)).toThrow(KeyError);
     // Lo que importa: media key pegada no puede dejar el archivo peor de lo que estaba.
     expect(readFileSync(tmp, 'utf8')).toContain('RGAPI-buena');
+  });
+});
+
+describe('la lectura — qué estoy fallando y qué hago bien', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'me',
+      gameName: 'LegendofTorcuato',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+    for (let i = 0; i < 8; i++) {
+      const raw = lobby({
+        matchId: `LA2_L${i}`,
+        index: i,
+        gameCreation: CREATION + i * HOUR,
+        win: i % 2 === 0,
+        myCsPerMinTarget: 7.6,
+        peerCsPerMinTarget: 7,
+      });
+      raw.info.queueId = 420;
+      saveMatch(db, flattenMatch(raw), raw);
+    }
+  });
+
+  it('no deja que una métrica contaminada encabece la lectura (G-008)', () => {
+    const l = lectura(db, 'smurf');
+    // CS por minuto es la métrica más obvia y la más engañosa: su promedio está dominado por
+    // las partidas que ganó. Puede mostrarse, pero no puede ser el titular.
+    expect(l.barras.every((b) => !b.contaminada)).toBe(true);
+    expect(l.mejor).not.toBe('CS por minuto');
+    expect(l.peor).not.toBe('CS por minuto');
+    // Y lo que quedó afuera se cuenta, para que el silencio sea visible.
+    expect(l.contaminadas).toBeGreaterThan(0);
+  });
+
+  it('no titula nada cuando ninguna métrica es fuerte ni floja', () => {
+    // El caso que apareció en pantalla: con todas las métricas empatadas la lista ordenada
+    // igual tiene un primero, y titulaba "lo que mejor hacés" sobre una diferencia de cero.
+    const plano = openDb(':memory:');
+    upsertAccount(plano, {
+      puuid: 'me',
+      gameName: 'LegendofTorcuato',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+    for (let i = 0; i < 8; i++) {
+      const raw = lobby({ matchId: `LA2_P${i}`, index: i, noVariance: true });
+      raw.info.queueId = 420;
+      saveMatch(plano, flattenMatch(raw), raw);
+    }
+    const l = lectura(plano, 'smurf');
+    expect(l.mejor).toBeNull();
+    expect(l.peor).toBeNull();
+    plano.close();
+  });
+
+  it('manda el efecto no medible como null explícito, nunca como cero', () => {
+    const l = lectura(db, 'smurf');
+    for (const barra of l.barras) {
+      expect(barra.effect === null || Number.isFinite(barra.effect)).toBe(true);
+    }
+    // El SVG se arma del lado donde el NaN todavía es NaN.
+    expect(typeof l.barrasSvg).toBe('string');
+    expect(l.barrasSvg.startsWith('<svg')).toBe(true);
+  });
+
+  it('cuenta los campeones que jugó, con sus victorias', () => {
+    const l = lectura(db, 'smurf');
+    const total = l.campeones.reduce((n, c) => n + c.partidas, 0);
+    expect(total).toBe(l.partidas);
+    expect(l.victorias + l.derrotas).toBe(l.partidas);
   });
 });

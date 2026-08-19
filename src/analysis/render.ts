@@ -161,7 +161,106 @@ ${ticks}
 }
 
 /**
- * The CSS the SVG builders REQUIRE, and the variables it reads.
+ * Una fila del gráfico de barras divergentes: una métrica, y de qué lado del rival caés.
+ *
+ * `effect` es el tamaño del efecto ya orientado — positivo SIEMPRE significa que él está mejor,
+ * sin importar si la métrica sube o baja (morir menos es mejor). NaN es "no medible" y se dibuja
+ * como tal en vez de como un cero, que es la sustitución que G-005 existe para frenar.
+ */
+export type MetricBar = {
+  label: string;
+  effect: number;
+  /** Los dos números crudos, ya formateados por quien sabe la unidad: "68,2 vs 64,1". */
+  detail: string;
+  games: number;
+};
+
+/** Más allá de esto el tamaño del efecto es enorme igual, y una barra más larga no dice más. */
+const EFFECT_CLAMP = 1.5;
+
+/**
+ * Barras divergentes ancladas en cero: dónde estás mejor y peor que TU RIVAL DE LÍNEA.
+ *
+ * Es la lectura que el panel no tenía y la que él pidió — entrar, mirar, y saber qué está
+ * fallando. La forma es divergente porque el trabajo del dato es POLARIDAD: no "cuánto farmeo"
+ * sino "de qué lado del rival caigo".
+ *
+ * Tres decisiones de dibujo, y ninguna es de gusto:
+ *
+ * - **La posición ya dice el signo.** Izquierda es peor, derecha es mejor, y el color solo lo
+ *   repite. Por eso puede haber daltonismo en la sala y el gráfico se sigue leyendo.
+ * - **Azul y naranja, no verde y rojo.** El par verde/rojo mide ΔE 7.9 bajo deuteranopía —
+ *   apenas distinguible— contra 26.8 del azul/naranja, que pasa todos los checks. El verde y el
+ *   rojo se quedan donde siempre llevan una palabra al lado ("victoria" / "DERROTA").
+ * - **El largo es el TAMAÑO DEL EFECTO, no la diferencia cruda.** Una diferencia de 8 de CS y una
+ *   de 0.3 de participación en kills no se comparan en la misma escala; en desvíos estándar sí.
+ *   Se recorta en ±1.5 porque más allá de ahí la barra deja de agregar información.
+ */
+export function metricBarsSvg(rows: MetricBar[], width = 720): string {
+  if (rows.length === 0) {
+    return `<svg viewBox="0 0 ${width} 40" width="100%"><text class="tag" x="8" y="22">todavía no hay muestra suficiente</text></svg>`;
+  }
+
+  const gutter = 262;
+  const rowH = 30;
+  const barH = 13;
+  const top = 22;
+  const height = top + rows.length * rowH + 10;
+  const plot = width - gutter - 82;
+  const zero = gutter + plot / 2;
+  const half = plot / 2;
+
+  const x = (effect: number): number => {
+    const clamped = Math.max(-EFFECT_CLAMP, Math.min(EFFECT_CLAMP, effect));
+    return zero + (clamped / EFFECT_CLAMP) * half;
+  };
+
+  const barras = rows
+    .map((row, i) => {
+      const cy = top + i * rowH + rowH / 2;
+      const y = cy - barH / 2;
+      // Recortada si no entra en la canaleta, con el nombre completo en el tooltip. Una
+      // etiqueta que se sale del viewBox se corta sin avisar y se lee como otra métrica: en la
+      // primera versión "Ventaja de oro+XP en fase de líneas" aparecía como "ntaja de oro+XP…".
+      const corta = row.label.length > 34 ? `${row.label.slice(0, 33)}…` : row.label;
+      const etiqueta =
+        `<text class="barlabel" x="${gutter - 10}" y="${cy + 4}" text-anchor="end">` +
+        `${esc(corta)}</text>`;
+      const titulo = `<title>${esc(`${row.label}: ${row.detail} · n=${row.games}`)}</title>`;
+
+      if (!Number.isFinite(row.effect)) {
+        // "No medible" se dibuja como texto y nunca como una barra de largo cero, que se leería
+        // como "no hay diferencia" (G-005).
+        return `<g>${titulo}${etiqueta}<text class="tag" x="${zero + 6}" y="${cy + 4}">sin dispersión para medirlo</text></g>`;
+      }
+
+      const fin = x(row.effect);
+      const mejor = row.effect >= 0;
+      const ancho = Math.max(2, Math.abs(fin - zero));
+      const inicio = mejor ? zero : zero - ancho;
+      // Extremo redondeado solo del lado que se aleja del cero: el cero es la línea base y una
+      // barra redondeada de los dos lados flota en vez de anclarse.
+      const r = Math.min(4, ancho);
+      const d = mejor
+        ? `M ${inicio} ${y} H ${inicio + ancho - r} A ${r} ${r} 0 0 1 ${inicio + ancho} ${y + r} V ${y + barH - r} A ${r} ${r} 0 0 1 ${inicio + ancho - r} ${y + barH} H ${inicio} Z`
+        : `M ${inicio + ancho} ${y} H ${inicio + r} A ${r} ${r} 0 0 0 ${inicio} ${y + r} V ${y + barH - r} A ${r} ${r} 0 0 0 ${inicio + r} ${y + barH} H ${inicio + ancho} Z`;
+
+      const valor =
+        `<text class="barvalue" x="${width - 76}" y="${cy + 4}">` + `${esc(row.detail)}</text>`;
+      return `<g>${titulo}${etiqueta}<path class="bar ${mejor ? 'mejor' : 'peor'}" d="${d}"/>${valor}</g>`;
+    })
+    .join('\n');
+
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="Dónde estás mejor y peor que tu rival de línea">
+  <text class="tag" x="${zero - half}" y="12">peor que el rival</text>
+  <text class="tag" x="${zero + half}" y="12" text-anchor="end">mejor que el rival</text>
+  <line class="zero" x1="${zero}" y1="${top - 6}" x2="${zero}" y2="${height - 8}"/>
+${barras}
+</svg>`;
+}
+
+/**
+ * The CSS the SVG builders REQUIRE, and the variables it reads."""
  *
  * Exported and shared, not copied. The builders emit `class="plot"`, `class="own"` and so on and
  * carry no presentation of their own, so an SVG pasted into a document that lacks these rules
@@ -186,6 +285,12 @@ circle.own { fill: var(--own); fill-opacity: .8; stroke: #0b0d11; stroke-opacity
 circle.enemy { fill: var(--enemy); fill-opacity: .8; stroke: #0b0d11; stroke-opacity: .55; stroke-width: 1; }
 text.tag { fill: var(--muted); font-size: 10px; paint-order: stroke; stroke: #0b0d11;
            stroke-width: 3px; stroke-linejoin: round; }
+/* Las barras divergentes. El texto lleva tokens de texto y NUNCA el color de la barra: el color
+   es identidad de la marca, no de la palabra que está al lado. */
+path.bar.mejor { fill: var(--better); }
+path.bar.peor  { fill: var(--worse); }
+text.barlabel { fill: var(--fg); font-size: 12px; }
+text.barvalue { fill: var(--muted); font-size: 11px; }
 `;
 
 /**
@@ -199,6 +304,9 @@ export const SVG_VARS_DARK = `
 :root {
   --fg: #e5e7eb; --muted: #9ca3af; --plot: #1a1d24;
   --grid: #374151; --up: #4ade80; --down: #f87171; --own: #60a5fa; --enemy: #f87171;
+  /* Par divergente azul/naranja: pasa los seis checks contra este fondo, incluida la
+     separación bajo daltonismo (ΔE 26.8 en protanopía, contra 7.9 del verde/rojo). */
+  --better: #3987e5; --worse: #d95926;
 }
 `;
 
@@ -207,6 +315,7 @@ export const SVG_VARS = `
 :root {
   --fg: #1a1a1a; --muted: #6b7280; --plot: #f3f4f6;
   --grid: #d1d5db; --up: #15803d; --down: #b91c1c; --own: #2563eb; --enemy: #dc2626;
+  --better: #2a78d6; --worse: #eb6834;
 }
 @media (prefers-color-scheme: dark) {
 ${SVG_VARS_DARK.replace(':root {', '  :root {').trimEnd()}

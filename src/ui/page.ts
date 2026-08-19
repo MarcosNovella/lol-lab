@@ -37,6 +37,29 @@ body {
   font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
 }
 h1 { font-size: 20px; margin: 0 0 4px; }
+/* La lectura: lo que quiere ver cuando entra. Separada visualmente de lo que se opera. */
+.hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px; margin-bottom: 12px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+        padding: 13px 15px; }
+.tile .k { color: var(--dim); font-size: 11px; text-transform: uppercase;
+           letter-spacing: .06em; }
+.tile .v { font-size: 21px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.tile .n { color: var(--dim); font-size: 12px; margin-top: 2px; }
+.titular { font-size: 16px; line-height: 1.55; margin: 0 0 12px; }
+.titular b { font-weight: 600; }
+.bien { color: var(--better); }
+.mal  { color: var(--worse); }
+/* Los tiles del hero llevan el nombre de la métrica, que puede ser largo. */
+.tile .v.bien, .tile .v.mal { font-size: 15px; line-height: 1.35; }
+.champ { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.champ .nombre { width: 108px; flex: none; }
+.champ .wr { flex: 1; height: 9px; background: #0f1218; border-radius: 5px; overflow: hidden; }
+.champ .wr span { display: block; height: 100%; background: var(--better); }
+.champ .num { color: var(--dim); font-size: 12px; width: 92px; text-align: right; flex: none;
+              font-variant-numeric: tabular-nums; }
+h2.grupo { color: var(--ink); font-size: 12px; letter-spacing: .12em;
+           border-top: 1px solid var(--line); padding-top: 18px; margin-top: 34px; }
 h2 { font-size: 15px; margin: 28px 0 10px; color: var(--dim); font-weight: 600;
      text-transform: uppercase; letter-spacing: .06em; }
 .wrap { max-width: 900px; margin: 0 auto; }
@@ -495,6 +518,7 @@ function renderSync() {
         void renderMomentos();
         void renderGraficos();
         void renderCobertura();
+        void renderLectura();
         void renderAntes();
         void renderLedger();
         void renderUpkeep();
@@ -746,6 +770,83 @@ async function renderUpkeep() {
     'venís de sincronizar: ninguna gasta un request de Riot.'));
 }
 
+function tile(k, v, n, cls) {
+  const t = el('div', 'tile');
+  t.append(el('div', 'k', k));
+  t.append(el('div', 'v' + (cls ? ' ' + cls : ''), v));
+  if (n) t.append(el('div', 'n', n));
+  return t;
+}
+
+async function renderLectura() {
+  const box = document.getElementById('lectura');
+  box.replaceChildren();
+  const l = await api('/api/lectura');
+
+  if (l.partidas === 0) {
+    box.append(el('div', 'card dim', l.notas.join(' ') || 'Todavía no hay partidas para leer.'));
+    return;
+  }
+
+  const hero = el('div', 'hero');
+  const soloq = l.rango.find((r) => r.cola === 'RANKED_SOLO_5x5');
+  hero.append(tile('rango', soloq ? soloq.texto : 'sin rango',
+    soloq && soloq.wins !== null ? soloq.wins + 'W-' + soloq.losses + 'L' : ''));
+  hero.append(tile('últimas ' + l.partidas, l.victorias + 'W-' + l.derrotas + 'L',
+    l.winrate + '% · ' + l.rol));
+  hero.append(tile('lo que mejor hacés', l.mejor || '—', 'contra tu rival de línea', 'bien'));
+  hero.append(tile('donde más perdés', l.peor || '—', 'contra tu rival de línea', 'mal'));
+  box.append(hero);
+
+  // El titular en una frase. Sin esto hay que leer el gráfico para saber qué mirar.
+  if (l.mejor && l.peor) {
+    const p = el('p', 'titular');
+    p.append(document.createTextNode('Contra los mid de tu propio elo estás '));
+    const bien = el('b', 'bien', 'mejor en ' + l.mejor.toLowerCase());
+    p.append(bien, document.createTextNode(' y '));
+    p.append(el('b', 'mal', 'peor en ' + l.peor.toLowerCase()));
+    p.append(document.createTextNode('.'));
+    box.append(p);
+  }
+
+  // Mismo camino que la curva y el mapa: el SVG lo arma el motor, que escapa todo lo que
+  // interpola, y acá se inserta tal cual en vez de reconstruirlo en el navegador.
+  const card = el('div', 'card');
+  card.innerHTML = l.barrasSvg;
+  box.append(card);
+
+  const nota = el('div', 'guardada',
+    'La referencia son los otros mid de TUS partidas, que Riot ya emparejó a tu MMR. ' +
+    'El largo de la barra es el tamaño del efecto, no la diferencia cruda: así una de CS y una ' +
+    'de participación en kills se pueden mirar juntas.' +
+    (l.contaminadas > 0
+      ? ' Quedaron afuera ' + l.contaminadas + ' métricas (CS/min, KDA, daño): su promedio está ' +
+        'dominado por las partidas que ganaste, así que no pueden encabezar nada.'
+      : ''));
+  box.append(nota);
+
+  if (l.campeones.length > 0) {
+    const champs = el('div', 'card');
+    champs.append(el('div', 'porque', 'Tus campeones en esas partidas'));
+    for (const c of l.campeones) {
+      const fila = el('div', 'champ');
+      const foto = cara(c.campeon);
+      if (foto) fila.append(foto);
+      fila.append(el('div', 'nombre', c.campeon));
+      const wr = el('div', 'wr');
+      const relleno = el('span');
+      relleno.style.width = Math.round((c.victorias / c.partidas) * 100) + '%';
+      wr.append(relleno);
+      fila.append(wr);
+      fila.append(el('div', 'num',
+        c.victorias + 'W-' + (c.partidas - c.victorias) + 'L · ' +
+        Math.round((c.victorias / c.partidas) * 100) + '%'));
+      champs.append(fila);
+    }
+    box.append(champs);
+  }
+}
+
 async function renderAntes() {
   const box = document.getElementById('antes');
   box.replaceChildren();
@@ -863,6 +964,7 @@ const fallar = (err) => {
 refrescar();
 renderSync();
 renderPrep();
+renderLectura().catch(fallar);
 renderAntes().catch(fallar);
 renderUpkeep().catch(fallar);
 renderPendientes().catch(fallar);
@@ -903,41 +1005,37 @@ El token cambia en cada arranque, así que un favorito viejo no sirve.</p>
   <p class="sub">Local, en tu máquina. Nada de esto sale de acá.</p>
   <div id="error" class="dim"></div>
 
-  <h2>Qué hacer ahora</h2>
   <div id="acciones"></div>
 
-  <h2>Antes de jugar</h2>
-  <div id="antes"></div>
-
-  <h2>Sincronizar</h2>
-  <div id="sync"></div>
-
-  <h2>Puesta al día</h2>
-  <div id="upkeep"></div>
-
-  <h2>Taguear</h2>
-  <div id="pendientes"></div>
-  <div id="tilt"></div>
+  <h2 class="grupo">Cómo venís</h2>
+  <div id="lectura"></div>
 
   <h2>Lo que salió caro</h2>
   <div id="momentos"></div>
 
-  <h2>En champ select</h2>
-  <div id="prep"></div>
-
   <h2>Curva y mapa</h2>
   <div id="graficos"></div>
 
-  <h2>De qué no puedo hablar todavía</h2>
+  <h2 class="grupo">Antes de jugar</h2>
+  <div id="antes"></div>
+
+  <h2>En champ select</h2>
+  <div id="prep"></div>
+
+  <h2 class="grupo">Después de jugar</h2>
+  <div id="sync"></div>
+  <div id="pendientes"></div>
+  <div id="tilt"></div>
+
+  <h2 class="grupo">De qué no puedo hablar todavía</h2>
   <div id="cobertura"></div>
 
   <h2>Hipótesis registradas</h2>
   <div id="ledger"></div>
 
-  <h2>Cuentas</h2>
+  <h2 class="grupo">La máquina</h2>
+  <div id="upkeep"></div>
   <div id="cuentas"></div>
-
-  <h2>Key</h2>
   <div id="key"></div>
 </div>
 <script>${CLIENT_SCRIPT}</script>

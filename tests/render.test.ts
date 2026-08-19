@@ -6,7 +6,9 @@ import {
   goldCurveSvg,
   isOwnHalf,
   MAP_MAX,
+  type MetricBar,
   mapPoint,
+  metricBarsSvg,
   renderPage,
   SVG_STYLE,
 } from '../src/analysis/render.ts';
@@ -161,8 +163,22 @@ describe('the SVGs carry no presentation of their own', () => {
     // a class like any other and needs a rule on both surfaces or the veil renders as an
     // opaque black plate over the picture.
     const svg =
-      deathMapSvg(dots) + deathMapSvg(dots, 520, '/img/map/map11.png') + goldCurveSvg(points);
-    return [...new Set([...svg.matchAll(/class="([^"]+)"/g)].map((m) => m[1] ?? ''))];
+      deathMapSvg(dots) +
+      deathMapSvg(dots, 520, '/img/map/map11.png') +
+      goldCurveSvg(points) +
+      // Las tres variantes de la barra: mejor, peor y la que no se puede medir. Un builder que
+      // no esté acá no está cubierto por esta garantía, que es exactamente cómo el mapa de
+      // muertes llegó a producción como un cuadrado negro.
+      metricBarsSvg([
+        { label: 'CS a los 10', effect: 0.8, detail: '68,2 vs 64,1', games: 39 },
+        { label: 'Muertes por minuto', effect: -0.5, detail: '0,18 vs 0,14', games: 39 },
+        { label: 'Placas', effect: Number.NaN, detail: '2 vs 2', games: 39 },
+      ]);
+    // Separadas por espacio: un `class="bar mejor"` son DOS clases, y buscarlo entero no
+    // encuentra la regla `path.bar.mejor` aunque exista.
+    return [
+      ...new Set([...svg.matchAll(/class="([^"]+)"/g)].flatMap((m) => (m[1] ?? '').split(/\s+/))),
+    ].filter((c) => c !== '');
   }
 
   it('every emitted class has a rule in the shared stylesheet', () => {
@@ -206,5 +222,53 @@ describe('el mapa con el minimapa de fondo', () => {
 
   it('escapes the URL, since it lands inside an attribute', () => {
     expect(deathMapSvg(dots, 520, '/img/map/x".png')).toContain('x&quot;.png');
+  });
+});
+
+describe('las barras divergentes', () => {
+  const fila = (over: Partial<MetricBar> & { label: string }): MetricBar => ({
+    effect: 0.5,
+    detail: '1,0 vs 0,5',
+    games: 12,
+    ...over,
+  });
+
+  it('manda la barra a la derecha cuando está mejor y a la izquierda cuando está peor', () => {
+    const svg = metricBarsSvg([
+      fila({ label: 'mejor', effect: 1 }),
+      fila({ label: 'peor', effect: -1 }),
+    ]);
+    expect(svg).toContain('class="bar mejor"');
+    expect(svg).toContain('class="bar peor"');
+  });
+
+  it('NO dibuja una barra cuando el efecto no es medible', () => {
+    // Una barra de largo cero se lee como "no hay diferencia", que es lo contrario de "no se
+    // puede medir" (G-005).
+    const svg = metricBarsSvg([fila({ label: 'sin dispersión', effect: Number.NaN })]);
+    // `class="bar` a secas también matchea `class="barlabel"`, que está en TODAS las filas.
+    expect(svg).not.toContain('class="bar mejor"');
+    expect(svg).not.toContain('class="bar peor"');
+    expect(svg).toContain('sin dispersión para medirlo');
+  });
+
+  it('recorta un efecto enorme en vez de dibujar fuera del gráfico', () => {
+    const normal = metricBarsSvg([fila({ label: 'a', effect: 1.5 })]);
+    const enorme = metricBarsSvg([fila({ label: 'a', effect: 40 })]);
+    // Misma geometría: más allá del tope la barra no puede seguir creciendo.
+    expect(enorme).toBe(normal);
+  });
+
+  it('recorta la etiqueta larga y guarda el nombre entero en el tooltip', () => {
+    const largo = 'Ventaja de oro y experiencia en la fase de líneas completa';
+    const svg = metricBarsSvg([fila({ label: largo })]);
+    expect(svg).not.toContain(`>${largo}<`);
+    expect(svg).toContain('…');
+    // El nombre completo sigue estando: se lee pasando el mouse, no se pierde.
+    expect(svg).toContain(largo);
+  });
+
+  it('dice que no hay muestra en vez de dibujar un gráfico vacío', () => {
+    expect(metricBarsSvg([])).toContain('todavía no hay muestra suficiente');
   });
 });
