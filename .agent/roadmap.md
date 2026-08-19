@@ -41,9 +41,17 @@ claim and lands squarely on the plan's "the leak is the even game".
 **A3. ~~`teamGoldDiff` contains his own lane pair~~ — DONE 2026-08-18.** r = 0.65, so "team
 state" and "lane state" were not independent. `LaneState.restOfTeamGoldDiff` now removes the
 pair; `teamGoldDiff` stays because it has consumers. `TeamStateSpec` freezes both bands and
-`team_state_dominates` is finally registerable — **it still has to be REGISTERED, on his
-machine, with both bands swept**. Note the remaining gold is not exogenous either: a mid who
-converts a lead by roaming makes his teammates richer, so this is less contaminated, not clean.
+`team_state_dominates` is finally registerable. **REGISTERED, and live as
+`team_state_dominates_500g`** (2026-08-19 00:09 UTC, spec `c2df1b2688a43d89`, baseline +0.318
+over n=19, needs n=88, gap 7). The first id was retired the same evening at n=0: it had been
+registered on a cache that stopped six games short because the key was expired, so its declared
+hole said 3 when it was 7 (G-027 — sync before registering). Same spec hash, same baseline. Both bands swept as
+required: all 75 cells of minute × band × teamBand are positive, in the frozen corpus and in the
+full cache, and the registered cell is among the smallest. Note the remaining gold is not
+exogenous either: a mid who converts a lead by roaming makes his teammates richer, so this is
+less contaminated, not clean. Measured on the way and it tempers the name: from lane-BEHIND
+games the same split gives 2/5 against 0/4, so team state is not doing something special to his
+lane leads.
 
 **A4. `conversionIsRobust` blesses a gap of exactly zero** — `Math.sign(0)` is 0 and `{0}` has
 size 1, so it returns `true` for "no difference at all". `tests/conversion.test.ts:57-67` pins
@@ -102,6 +110,16 @@ Register at minimum:
 - `diana_conversion`: Diana converts a lead worse than Locke. n=9 vs 11 today. Weak.
 - `team_state_dominates`: lane-ahead + team-behind games are lost far more often than
   lane-ahead + team-ahead. n=5 vs 15 today.
+
+**ALL OF THIS LIST IS REGISTERED, and one candidate was killed instead.** The ledger holds five
+rows as of 2026-08-18: `lead_conversion_gap`, `lead_conversion_gap_gold`, `diana_needs_a_lead`,
+`ward_before_objective_60s` and `team_state_dominates` (plus one retired). `growth_drift` was
+queued and is NOT registered: its own registration sweep destroyed it. The -0.147 per game came
+from subtracting the first point of a rolling mean from the last; a line fitted over all 39
+points gives +0.030 — the OPPOSITE sign — and the window sweep runs +0.083 / +0.030 / -0.015
+over 5 / 10 / 20 games. There is no direction to predict (G-025). The measure survives with a
+fitted estimator and will have something to say when there are enough games for a trend to
+exist; nothing about his lane edge "decaying" should be repeated in the meantime.
 
 ---
 

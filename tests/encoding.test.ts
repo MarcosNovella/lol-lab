@@ -17,10 +17,16 @@ import { describe, expect, it } from 'vitest';
  *
  * This test caught itself first: the sentence above originally carried a raw NUL as its
  * example, which is exactly the mistake being guarded against.
+ *
+ * `.agent` is scanned too, and it was added for cause: G-018's OWN line in `guardrails.md`
+ * carried a raw NUL where it meant to show the escape, so the ledger that states the rule was
+ * the one file breaking it — and git had been classifying it as binary, which silently costs
+ * line-by-line diff and blame on the document that most needs both.
  */
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SCANNED = ['src', 'tests', 'scripts'];
+const SCANNED = ['src', 'tests', 'scripts', '.agent'];
+const EXTENSIONS = ['.ts', '.sql', '.json', '.md'];
 
 /** Tab, newline and carriage return are the control characters text is allowed to contain. */
 const ALLOWED = new Set([0x09, 0x0a, 0x0d]);
@@ -30,9 +36,7 @@ function walk(dir: string): string[] {
   for (const entry of readdirSync(dir)) {
     const path = join(dir, entry);
     if (statSync(path).isDirectory()) found.push(...walk(path));
-    else if (path.endsWith('.ts') || path.endsWith('.sql') || path.endsWith('.json')) {
-      found.push(path);
-    }
+    else if (EXTENSIONS.some((extension) => path.endsWith(extension))) found.push(path);
   }
   return found;
 }
