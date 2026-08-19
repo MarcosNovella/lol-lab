@@ -1,61 +1,48 @@
-import { fetchItems, listVersions, versionForPatch } from '../riot/ddragon.ts';
 import { openDb } from '../store/db.ts';
-import { catalogVersions, patchesInCache, saveItems } from '../store/items.ts';
+import { catalogVersions, patchesInCache } from '../store/items.ts';
+import { bajarCatalogos } from '../upkeep.ts';
 import { out } from './shared.ts';
 
 /**
- * `lol items` — brings down the item table for every patch his cache actually contains.
+ * `lol items` — baja la tabla de ítems de cada parche que la caché contenga.
  *
- * No key, no rate limiter, and idempotent: Data Dragon is immutable per version, so a second run
- * re-downloads nothing it already has unless asked. It is a separate command rather than a step
- * of the sync because it is a once-per-patch errand, and folding it into the nightly ritual would
- * spend a network round trip every evening to learn that nothing changed.
+ * Sin key, sin rate limiter, e idempotente: Data Dragon es inmutable por versión, así que una
+ * segunda corrida no vuelve a bajar nada.
+ *
+ * La lógica vive en `src/upkeep.ts` y no acá: el panel corre exactamente esto detrás del botón de
+ * sincronizar, y dos implementaciones de "qué catálogo falta" es cómo terminan dando respuestas
+ * distintas el día que una aprende algo que la otra no.
  */
 
-export async function run(argv: string[]): Promise<void> {
-  const force = argv.includes('--todo');
+export async function run(): Promise<void> {
   const db = openDb();
-
-  const patches = patchesInCache(db);
-  if (patches.length === 0) {
-    out('No hay partidas en caché todavía, así que no hay parche que buscar.');
-    db.close();
-    return;
-  }
-
-  const have = new Set(catalogVersions(db).map((c) => c.version));
-  const versions = await listVersions();
-
-  out(`Parches en caché: ${patches.map((p) => `${p.patch} (${p.games})`).join(' · ')}`);
-  out('');
-
-  let downloaded = 0;
-  for (const { patch, games } of patches) {
-    const version = versionForPatch(versions, patch);
-    if (version === null) {
-      // Never fall back to the newest catalogue: an item's build path changes between patches,
-      // so the wrong table gives a confident wrong answer (G-015).
-      out(
-        `  ${patch}: Data Dragon no publica ese parche — esas ${games} partidas quedan sin ítems`,
-      );
-      continue;
+  try {
+    const patches = patchesInCache(db);
+    if (patches.length === 0) {
+      out('No hay partidas en caché todavía, así que no hay parche que buscar.');
+      return;
     }
-    if (have.has(version) && !force) {
-      out(`  ${patch} → ${version}: ya está`);
-      continue;
-    }
-    const items = await fetchItems(version);
-    const saved = saveItems(db, items);
-    downloaded += 1;
-    out(
-      `  ${patch} → ${version}: ${saved} ítems (${items.filter((i) => i.finished).length} terminados)`,
+    out(`Parches en caché: ${patches.map((p) => `${p.patch} (${p.games})`).join(' · ')}`);
+    out('');
+
+    const result = await bajarCatalogos(db, (hechas, total, detalle) =>
+      out(`  ${detalle} (${hechas}/${total})`),
     );
-  }
 
-  out('');
-  out(downloaded === 0 ? 'Nada nuevo que bajar.' : `Bajé ${downloaded} catálogo(s).`);
-  db.close();
+    for (const patch of result.sinPublicar) {
+      // Nunca caer al catálogo más nuevo: el build path de un ítem cambia entre parches (G-015).
+      out(`  ${patch}: Data Dragon no publica ese parche — esas partidas quedan sin ítems`);
+    }
+    out('');
+    out(
+      result.bajados === 0
+        ? `Nada nuevo que bajar (${result.yaEstaban} ya estaban).`
+        : `Bajé ${result.bajados} catálogo(s). Ahora hay ${catalogVersions(db).length}.`,
+    );
+  } finally {
+    db.close();
+  }
 }
 
 export const SUMMARY = 'baja la tabla de ítems de Data Dragon, un catálogo por parche jugado';
-export const USAGE = 'lol items [--todo]';
+export const USAGE = 'lol items';

@@ -8,6 +8,7 @@ import { createClient } from '../riot/client.ts';
 import type { Db } from '../store/db.ts';
 import { ASSETS_ROOT, openDb } from '../store/db.ts';
 import { syncMatches } from '../sync.ts';
+import { bajarCatalogos, bajarImagenes, evaluarLedger } from '../upkeep.ts';
 import { renderShell } from './page.ts';
 import {
   abrirSesion,
@@ -17,6 +18,7 @@ import {
   dejarAtras,
   estado,
   graficos,
+  guardarKey,
   ledger,
   momentos,
   pendientes,
@@ -24,7 +26,9 @@ import {
   RouteError,
   type SyncEvento,
   sincronizar,
+  type TareaEvento,
   taguear,
+  upkeep,
 } from './routes.ts';
 
 /**
@@ -148,7 +152,7 @@ const numOrNull = (body: Record<string, unknown>, field: string): number | null 
  * Server-Sent Events: the browser speaks this natively, so a progress stream costs no
  * dependency and no WebSocket handshake (ADR-003).
  */
-function sse(response: ServerResponse): (evento: SyncEvento) => void {
+function sse<T extends { tipo: string }>(response: ServerResponse): (evento: T) => void {
   response.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-store',
@@ -286,6 +290,13 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
       );
       return;
     }
+    // El valor viaja en el cuerpo y no en la URL, y la respuesta es el estado sin el valor
+    // adentro: lo que entra al archivo no vuelve a salir por ningún lado (G-002).
+    if (url.pathname === '/api/key' && request.method === 'POST') {
+      const body = await readJson(request);
+      json(response, 200, guardarKey(str(body, 'valor')));
+      return;
+    }
     if (url.pathname === '/api/dejar-atras' && request.method === 'POST') {
       json(response, 200, dejarAtras(db));
       return;
@@ -329,7 +340,7 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
       return;
     }
     if (url.pathname === '/api/sync') {
-      const emit = sse(response);
+      const emit = sse<SyncEvento>(response);
       await sincronizar(db, cuenta, emit, {
         sync: async (puuid, onProgress) => {
           const client = createClient();
@@ -345,8 +356,88 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
         rango: async () => {
           await snapshotAll(db);
         },
+        // La cadena entera detrás del mismo botón: catálogos de ítems del parche nuevo,
+        // imágenes de los campeones que no había visto nunca, y la evaluación del ledger si
+        // entraron partidas. Ninguna gasta un request de Riot.
+        tareas: async (huboPartidasNuevas, paso) => {
+          const items = await bajarCatalogos(db, (hechas, total, detalle) =>
+            paso('catálogos', `${detalle} (${hechas}/${total})`),
+          );
+          if (items.bajados > 0) paso('catálogos', `${items.bajados} nuevo(s)`);
+
+          const art = await bajarImagenes(db, (_h, _t, detalle) => paso('imágenes', detalle));
+          if (art.bajadas > 0) {
+            paso('imágenes', `${art.bajadas} nueva(s), ${art.megas.toFixed(1)} MB`);
+          }
+
+          if (huboPartidasNuevas) {
+            const ledger = evaluarLedger(db);
+            if (ledger.evaluadas > 0) paso('ledger', `${ledger.evaluadas} hipótesis evaluadas`);
+          }
+        },
       });
       response.end();
+      return;
+    }
+
+    // Las mismas tareas, sueltas, para cuando falta algo y no viene de sincronizar. Stream por
+    // lo mismo que el sync: la primera bajada de imágenes son 5,9 MB y una página quieta durante
+    // un minuto se lee como una página colgada.
+    if (url.pathname === '/api/tarea') {
+      const que = url.searchParams.get('que') ?? '';
+      const emit = sse<TareaEvento>(response);
+      try {
+        emit({ tipo: 'inicio', cuenta: que });
+        if (que === 'catalogos') {
+          const r = await bajarCatalogos(db, (hechas, total, detalle) =>
+            emit({ tipo: 'progreso', hechas, total, detalle }),
+          );
+          emit({
+            tipo: 'listo',
+            detalle:
+              `${r.bajados} catálogo(s) nuevo(s), ${r.yaEstaban} ya estaban` +
+              (r.sinPublicar.length > 0
+                ? ` · sin publicar en Data Dragon: ${r.sinPublicar.join(', ')}`
+                : ''),
+          });
+        } else if (que === 'imagenes') {
+          const r = await bajarImagenes(db, (hechas, total, detalle) =>
+            emit({ tipo: 'progreso', hechas, total, detalle }),
+          );
+          emit({
+            tipo: 'listo',
+            detalle:
+              r.bloqueado ??
+              `${r.bajadas} imagen(es) nueva(s), ${r.yaEstaban} ya estaban` +
+                (r.bajadas > 0 ? `, ${r.megas.toFixed(1)} MB` : ''),
+          });
+        } else if (que === 'ledger') {
+          const r = evaluarLedger(db);
+          const detalle = Object.entries(r.veredictos)
+            .map(([v, n]) => `${n} ${v}`)
+            .join(' · ');
+          emit({
+            tipo: 'listo',
+            detalle:
+              r.evaluadas === 0
+                ? 'el ledger no tiene hipótesis vivas'
+                : `${r.evaluadas} evaluada(s) — ${detalle}`,
+          });
+        } else {
+          emit({ tipo: 'error', mensaje: `no existe la tarea '${que}'` });
+        }
+      } catch (error) {
+        emit({
+          tipo: 'error',
+          mensaje: error instanceof Error ? error.message : String(error),
+        });
+      }
+      response.end();
+      return;
+    }
+
+    if (url.pathname === '/api/upkeep') {
+      json(response, 200, upkeep(db));
       return;
     }
     json(response, 404, { error: `no existe ${url.pathname}` });

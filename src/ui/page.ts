@@ -107,6 +107,11 @@ td { padding: 3px 8px 3px 0; border-top: 1px solid var(--line); }
 .foco { border-left: 3px solid var(--warn); }
 .foco .claim { margin: 6px 0; }
 .guardada { color: var(--dim); font-size: 12px; margin-top: 4px; }
+.tarea { display: flex; gap: 14px; align-items: center; padding: 7px 0; }
+.tarea .txt { flex: 1; min-width: 0; }
+.tarea button { flex: none; }
+.tarea input { width: 100%; }
+.accion button { flex: none; align-self: center; }
 .anotado { color: var(--warn); font-size: 12px; margin-top: 8px; }
 input { font: inherit; color: var(--ink); background: #0b0d11; border: 1px solid var(--line);
         border-radius: 7px; padding: 6px 10px; width: 150px; }
@@ -173,6 +178,31 @@ function renderAcciones(acciones) {
     txt.append(el('div', 'que', a.que));
     txt.append(el('div', 'porque', a.porque));
     card.append(txt);
+
+    // Un panel que dice "sincronizá" y te deja buscando el botón es un panel que te hace
+    // trabajar a vos. La acción que se puede ejecutar, se ejecuta desde acá.
+    if (a.id === 'sync') {
+      const boton = el('button', null, 'Sincronizar');
+      boton.onclick = () => document.getElementById('boton-sync').click();
+      card.append(boton);
+    }
+    if (a.id === 'key') {
+      const boton = el('button', null, 'Pegar la key');
+      boton.onclick = () => {
+        const seccion = document.getElementById('key');
+        seccion.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const input = seccion.querySelector('input');
+        if (input) input.focus();
+      };
+      card.append(boton);
+    }
+    if (a.id === 'taguear') {
+      const boton = el('button', null, 'Ir a taguear');
+      boton.onclick = () => document.getElementById('pendientes').scrollIntoView({
+        behavior: 'smooth', block: 'start',
+      });
+      card.append(boton);
+    }
     box.append(card);
   }
 }
@@ -225,7 +255,54 @@ function renderKey(key) {
     );
   }
   if (key.problema) card.append(el('div', 'porque', key.problema));
+  card.append(campoKey());
   box.append(card);
+}
+
+/**
+ * Pegar la key sin salir del panel.
+ *
+ * Es la fricción más frecuente que hay: las de desarrollo vencen cada 24 h. Y además cierra el
+ * accidente de agosto — pegarla a mano en el archivo equivocado, que estaba trackeado. Acá el
+ * destino lo elige el programa.
+ *
+ * El input es de tipo password para que no quede legible en una captura, se limpia apenas se
+ * guarda, y
+ * la respuesta del servidor no trae el valor: el panel nunca vuelve a mostrar la key.
+ */
+function campoKey() {
+  const fila = el('div', 'tarea');
+  const input = el('input');
+  input.type = 'password';
+  input.placeholder = 'pegá acá la key nueva (RGAPI-…)';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  const boton = el('button', null, 'Guardar');
+  const salida = el('div', 'porque', '');
+  const txt = el('div', 'txt');
+  txt.append(input, salida);
+  fila.append(txt, boton);
+
+  const guardar = async () => {
+    const valor = input.value.trim();
+    if (valor === '') return;
+    boton.disabled = true;
+    salida.textContent = 'guardando…';
+    try {
+      const nueva = await post('/api/key', { valor: valor });
+      // Se borra en el acto: dejarla en el input la deja en la memoria de la página y en
+      // cualquier captura de pantalla.
+      input.value = '';
+      salida.textContent = 'guardada. ' + (nueva.problema || 'el reloj de 24 h arranca de nuevo.');
+      void refrescar();
+    } catch (err) {
+      salida.textContent = 'no la guardé: ' + err.message;
+    }
+    boton.disabled = false;
+  };
+  boton.onclick = () => { void guardar(); };
+  input.onkeydown = (e) => { if (e.key === 'Enter') void guardar(); };
+  return fila;
 }
 
 const post = (path, body) => fetch(path + (path.includes('?') ? '&' : '?') + 't=' + TOKEN, {
@@ -380,6 +457,7 @@ function renderSync() {
   box.replaceChildren();
   const card = el('div', 'card');
   const boton = el('button', null, 'Sincronizar ahora');
+  boton.id = 'boton-sync';
   const barra = el('div', 'barra');
   const relleno = el('div');
   barra.append(relleno);
@@ -402,6 +480,9 @@ function renderSync() {
         relleno.style.width = (e.total === 0 ? 0 : (e.hechas / e.total) * 100) + '%';
         log.textContent = e.hechas + ' de ' + e.total;
       }
+      // La cadena de después: catálogos, imágenes, ledger. Se muestra mientras pasa, porque una
+      // barra llena y treinta segundos de silencio se leen como que se colgó.
+      if (e.tipo === 'paso') log.textContent = e.que + ': ' + e.detalle;
       if (e.tipo === 'fin') {
         relleno.style.width = '100%';
         log.textContent =
@@ -414,6 +495,9 @@ function renderSync() {
         void renderMomentos();
         void renderGraficos();
         void renderCobertura();
+        void renderAntes();
+        void renderLedger();
+        void renderUpkeep();
       }
       if (e.tipo === 'error') {
         log.textContent = 'no corrió: ' + e.mensaje;
@@ -585,6 +669,83 @@ async function renderCobertura() {
   box.append(card);
 }
 
+/** Corre una tarea de mantenimiento y va contando lo que hace. */
+function correrTarea(que, boton, salida, alTerminar) {
+  boton.disabled = true;
+  salida.textContent = 'trabajando…';
+  const src = new EventSource('/api/tarea?t=' + TOKEN + '&que=' + que);
+  src.onmessage = (msg) => {
+    const e = JSON.parse(msg.data);
+    if (e.tipo === 'progreso') salida.textContent = e.detalle;
+    if (e.tipo === 'listo') {
+      salida.textContent = e.detalle;
+      src.close();
+      boton.disabled = false;
+      if (alTerminar) alTerminar();
+    }
+    if (e.tipo === 'error') {
+      salida.textContent = 'no salió: ' + e.mensaje;
+      src.close();
+      boton.disabled = false;
+    }
+  };
+  // Igual que el sync: si el stream muere sin cerrar, el botón tiene que volver o la página
+  // queda tildada hasta un F5.
+  src.onerror = () => {
+    src.close();
+    boton.disabled = false;
+    if (salida.textContent === 'trabajando…') salida.textContent = 'se cortó la conexión';
+  };
+}
+
+function tareaFila(titulo, estado, textoBoton, que, alTerminar) {
+  const fila = el('div', 'tarea');
+  const txt = el('div', 'txt');
+  txt.append(el('div', 'que', titulo));
+  const salida = el('div', 'porque', estado);
+  txt.append(salida);
+  const boton = el('button', null, textoBoton);
+  boton.onclick = () => correrTarea(que, boton, salida, alTerminar);
+  fila.append(txt, boton);
+  return fila;
+}
+
+async function renderUpkeep() {
+  const box = document.getElementById('upkeep');
+  box.replaceChildren();
+  const u = await api('/api/upkeep');
+  const card = el('div', 'card');
+
+  const refrescarTodo = () => { void renderUpkeep(); void renderAntes(); void refrescar(); };
+
+  card.append(tareaFila(
+    'Catálogos de ítems',
+    u.catalogos.tengo + ' parche(s) al día' +
+      (u.catalogos.faltan > 0 ? ' · faltan ' + u.catalogos.sinPublicar.join(', ') : ''),
+    u.catalogos.faltan > 0 ? 'Bajar los que faltan' : 'Revisar',
+    'catalogos', refrescarTodo));
+
+  card.append(tareaFila(
+    'Imágenes',
+    u.imagenes.campeones + ' campeones · ' + u.imagenes.items + ' ítems · mapa ' +
+      (u.imagenes.mapa ? 'sí' : 'NO') +
+      (u.imagenes.faltanCampeones > 0 ? ' · faltan ' + u.imagenes.faltanCampeones : ''),
+    (u.imagenes.campeones === 0 ? 'Bajar (5,9 MB, una vez)' : 'Bajar lo que falte'),
+    'imagenes', refrescarTodo));
+
+  card.append(tareaFila(
+    'Ledger',
+    u.ledger.vivas + ' hipótesis vivas · ' + u.ledger.evaluadas + ' evaluadas · ' +
+      u.ledger.expuestas + ' ya te las mostré antes de jugar',
+    'Evaluar ahora',
+    'ledger', refrescarTodo));
+
+  box.append(card);
+  box.append(el('div', 'guardada',
+    'Todo esto corre solo cuando sincronizás. Los botones son para cuando falta algo y no ' +
+    'venís de sincronizar: ninguna gasta un request de Riot.'));
+}
+
 async function renderAntes() {
   const box = document.getElementById('antes');
   box.replaceChildren();
@@ -703,6 +864,7 @@ refrescar();
 renderSync();
 renderPrep();
 renderAntes().catch(fallar);
+renderUpkeep().catch(fallar);
 renderPendientes().catch(fallar);
 renderMomentos().catch(fallar);
 renderGraficos().catch(fallar);
@@ -749,6 +911,9 @@ El token cambia en cada arranque, así que un favorito viejo no sirve.</p>
 
   <h2>Sincronizar</h2>
   <div id="sync"></div>
+
+  <h2>Puesta al día</h2>
+  <div id="upkeep"></div>
 
   <h2>Taguear</h2>
   <div id="pendientes"></div>

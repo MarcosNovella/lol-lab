@@ -91,14 +91,23 @@ Si preferís la terminal, `pnpm lol cerrar` hace el mismo ritual con una tecla p
 (`y` la produje yo · `i` salía igual · `p` estuvo pareja). `pnpm lol` solo lista todo lo demás:
 `antes`, `report`, `prep`, `cobertura`, `growth`, `page`, `hip`, `rank`, `items`.
 
-`pnpm lol items` es de una sola vez por parche: baja la tabla de ítems de Data Dragon (sin key,
-sin rate limit, un catálogo por parche que hayas jugado) y con eso el reporte y el panel pueden
-decirte cuándo completaste cada ítem y cuándo lo completó tu rival de línea. Después de un parche
-nuevo, corrélo una vez.
+**No hace falta correr nada más.** El botón de sincronizar hace la cadena entera: baja las
+partidas, anota el rango, baja el catálogo de ítems si jugaste un parche nuevo, baja las imágenes
+de los campeones que no había visto nunca y evalúa el ledger si entraron partidas. Ninguna de esas
+tareas gasta un request de Riot —Data Dragon es otro host y no pide key, y evaluar es aritmética
+local— así que pueden correr solas. Bajar partidas, que sí gasta, sigue siendo un botón que
+apretás vos.
 
-`pnpm lol assets` es de una sola vez a secas: baja los retratos de campeón, los íconos de ítem y
-el minimapa (5.9 MB) a `data/img/`, y el panel los sirve desde tu máquina. No hay hotlink a la
-CDN de Riot: sin esto la página funciona igual, pero en texto.
+La sección **Puesta al día** te muestra qué falta y tiene un botón por tarea, para cuando falta
+algo y no venís de sincronizar.
+
+**La key también se pega en el panel**, abajo de todo: campo, Guardar, y sigue. El panel escribe
+`.env` por vos, no muestra nunca el valor y no acepta nada que no empiece con `RGAPI-`. Es la
+única fricción de todos los días —las de desarrollo vencen cada 24 h— y ya no te saca de la
+página.
+
+Los mismos comandos siguen existiendo por si preferís la terminal: `pnpm lol items` (catálogo por
+parche) y `pnpm lol assets` (5.9 MB de arte, una vez).
 
 ## Las tools
 

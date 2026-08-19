@@ -25,7 +25,7 @@ import { loadPriors, priorFor, priorsKeyedLike } from '../analysis/priors.ts';
 import { describeRank, latestSnapshot, TRACKED_QUEUES } from '../analysis/rank.ts';
 import { type DeathDot, deathMapSvg, goldCurveSvg, isOwnHalf } from '../analysis/render.ts';
 import { assembleBriefing, PregameError } from '../pregame.ts';
-import { keyState } from '../riot/key.ts';
+import { KeyError, keyState, writeKey } from '../riot/key.ts';
 import type { Db } from '../store/db.ts';
 import { ASSETS_ROOT } from '../store/db.ts';
 import { catalogForPatch } from '../store/items.ts';
@@ -37,6 +37,7 @@ import {
   listAccounts,
   queryParticipants,
 } from '../store/matches.ts';
+import { type Upkeep, upkeepState } from '../upkeep.ts';
 
 /**
  * The UI's handlers, as functions over `Db` rather than over an HTTP request.
@@ -331,7 +332,19 @@ export function syncEnCurso(): boolean {
 export type SyncEvento =
   | { tipo: 'inicio'; cuenta: string }
   | { tipo: 'progreso'; hechas: number; total: number }
+  /** Un paso de la cadena posterior al sync: catálogos, imágenes, ledger. */
+  | { tipo: 'paso'; que: string; detalle: string }
   | { tipo: 'fin'; bajadas: number; timelines: number; remakes: number; errores: string[] }
+  | { tipo: 'error'; mensaje: string };
+
+/**
+ * Una tarea suelta de puesta al día. Distinta de `SyncEvento` a propósito: comparten el canal
+ * pero no el vocabulario, y un `fin` de sync trae números que una tarea no tiene.
+ */
+export type TareaEvento =
+  | { tipo: 'inicio'; cuenta: string }
+  | { tipo: 'progreso'; hechas: number; total: number; detalle: string }
+  | { tipo: 'listo'; detalle: string }
   | { tipo: 'error'; mensaje: string };
 
 /**
@@ -356,6 +369,15 @@ export async function sincronizar(
       errors: string[];
     }>;
     rango?: () => Promise<void>;
+    /**
+     * Lo que antes eran tres comandos de terminal. Corre DESPUÉS de bajar las partidas y recibe
+     * si hubo alguna nueva, porque evaluar el ledger sin partidas nuevas solo agrega una fila
+     * idéntica.
+     */
+    tareas?: (
+      huboPartidasNuevas: boolean,
+      paso: (que: string, detalle: string) => void,
+    ) => Promise<void>;
   },
 ): Promise<void> {
   if (corriendo) throw new RouteError(409, 'ya hay un sync corriendo');
@@ -378,6 +400,23 @@ export async function sincronizar(
     // New games mean a new map. Dropped here rather than left to expire, so the page redrawing
     // after a sync shows the games that sync just brought in.
     olvidarMapa();
+
+    // La cadena que hace que no haya que correr nada a mano. Va envuelta por lo mismo que el
+    // reloj de rango: son mejoras sobre un sync que YA salió bien, y un fallo bajando un ícono
+    // no puede convertir una sincronización exitosa en una fallida.
+    if (deps.tareas) {
+      try {
+        await deps.tareas(result.fetched > 0, (que, detalle) =>
+          emit({ tipo: 'paso', que, detalle }),
+        );
+      } catch (error) {
+        emit({
+          tipo: 'paso',
+          que: 'puesta al día',
+          detalle: `quedó a medias: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+    }
     emit({
       tipo: 'fin',
       bajadas: result.fetched,
@@ -723,4 +762,36 @@ export function antes(db: Db, cuenta: string, now: number = Date.now()): Briefin
     if (error instanceof PregameError) throw new RouteError(404, error.message);
     throw error;
   }
+}
+
+// ------------------------------------------------------------------------ puesta al día
+
+/** Qué está al día y qué no. Consulta local: no baja nada y no gasta un solo request. */
+export function upkeep(db: Db): Upkeep {
+  return upkeepState(db);
+}
+
+/**
+ * Guarda una key nueva desde el panel. Devuelve el estado, NUNCA el valor (G-002).
+ *
+ * Es un POST y no un GET a propósito: una query string queda en el log del servidor, en el
+ * historial del navegador y en cualquier captura de la barra de direcciones. El cuerpo de un POST
+ * no.
+ */
+export function guardarKey(valor: string, now: number = Date.now()): EstadoKey {
+  try {
+    writeKey(valor);
+  } catch (error) {
+    if (error instanceof KeyError) throw new RouteError(400, error.message);
+    throw error;
+  }
+  const key = keyState(new Date(now));
+  return {
+    presente: key.present,
+    tipo: key.kind,
+    horasDesdeQueSePego: key.hoursSinceUpdate,
+    probablementeVencida: key.likelyExpired,
+    problema: key.problem,
+    archivo: key.envPath,
+  };
 }

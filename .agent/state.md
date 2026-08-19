@@ -288,6 +288,44 @@ write). ADR-022.
 - `lol antes` has no `--sin-anotar`. A register that can be bypassed is a register that lies at
   the exact moment it has to be believed.
 
+### S9b — el panel hace las tareas, y ya no hay que correr nada
+
+Su pedido, textual: *"yo no quiero correr nada, yo quiero que la ui tenga botones y haga las cosas
+sola"*. Tenía razón y era un defecto de diseño, no una preferencia: tres de los cuatro comandos
+que quedaban eran cosas que hay que ACORDARSE de correr, y cada olvido tiene un costo real —
+sin catálogo no hay tiempos de ítem, sin imágenes el panel es texto, y sin evaluar el ledger el
+briefing de S9 no puede mostrar nada (G-029). ADR-023 y ADR-024.
+
+- **`src/upkeep.ts`**: catálogos de ítems, imágenes y evaluación del ledger, en una sola
+  implementación. `lol items` y `lol assets` se reescribieron encima de ella, así que ya no hay
+  dos versiones de "qué falta". Cada tarea es idempotente y calcula el faltante con una consulta
+  LOCAL, que es lo que hace que se puedan correr siempre.
+- **El botón de sincronizar corre la cadena entera** — partidas → rango → catálogos → imágenes →
+  ledger (esto último solo si entraron partidas, porque sin evidencia nueva una evaluación es una
+  fila idéntica). Pueden ser automáticas porque **ninguna gasta un request de Riot**: Data Dragon
+  es otro host y sin key, y evaluar es aritmética local. El sync de partidas, que sí gasta, sigue
+  siendo un botón que él aprieta.
+- **Sección "Puesta al día"** con lo que falta y un botón por tarea, para cuando falta algo y no
+  viene de sincronizar. Y las acciones de "Qué hacer ahora" ahora EJECUTAN: sincronizar, ir a
+  taguear, pegar la key.
+- **La key se pega en el panel** (ADR-024). Era la fricción más frecuente que existe —vence cada
+  24 h— y el último paso que lo sacaba del panel. Cierra además el incidente de S8b: la pegó en
+  `.env.example`, que está trackeado y va a un repo público. Va por POST y nunca por query string,
+  el input es password y se limpia al guardar, la respuesta no trae el valor (G-002) y lo que no
+  empieza con `RGAPI-` se rechaza ANTES de tocar el archivo.
+- **G-030, dos veces en una sesión.** `writeKey` escribía al `.env` del proyecto: el primer test
+  le habría borrado su key REAL en cada `pnpm verify`, en silencio, y se habría enterado como un
+  401. Y `upkeepState` contaba PNGs en el `data/img` real, así que su test pasaba en una máquina
+  sin arte bajado y fallaba en una con arte — falló acá en el momento en que corrí la descarga,
+  que es como se encontró. Las dos toman la ruta por parámetro ahora, con la forma de `openDb`.
+- Bajado y visto de verdad contra Data Dragon: 1 catálogo, 244 imágenes, 2,1 MB, y la segunda
+  corrida dice "0 nuevas, 244 ya estaban".
+- `lol items --todo` (forzar rebajada) se perdió en la reescritura. No estaba documentado en
+  ningún lado y Data Dragon es inmutable por versión, así que solo servía si un catálogo se
+  hubiera guardado corrupto.
+
+verify verde, 320 tests.
+
 ## Open questions
 - **Diana**: closed by D3 as "the ledger decides", with the caveat that at n=5 needing 25, and 8
   games since he last played her, it may never reach n.
@@ -297,6 +335,8 @@ write). ADR-022.
 - `data/` is gitignored and single-machine, and a cloud session cannot check a single number. A
   derived, versionable export is the cheap fix; whether it gets committed is his call.
 - `git config user.name` is unset ON HIS MACHINE, so his commits are authored by `unknown`.
+- **Nothing from S9/S9b has run on the real cache.** The upkeep chain was exercised against live
+  Data Dragon here (a real catalogue and 244 real images), but never against HIS 86 matches.
 - **The briefing has never run on the real cache.** Everything in S9 was measured against fixtures
   and a seeded database; the first real run is his, and the first thing to check is whether the
   row it picks is the one a human would have picked.

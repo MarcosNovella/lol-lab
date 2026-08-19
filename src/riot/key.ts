@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PLATFORM, isPlatform, type Platform } from './routing.ts';
@@ -134,6 +134,60 @@ export function keyState(now: Date = new Date()): KeyState {
         `No hace falta reiniciar nada.`
       : null,
   };
+}
+
+export class KeyError extends Error {}
+
+/**
+ * Escribe una key nueva en `.env`, preservando todo lo demás del archivo.
+ *
+ * Existe porque la key de desarrollo vence cada 24 h y pegarla era el último paso que lo
+ * obligaba a salir del panel. También cierra el incidente de S8b: la pegó a mano en
+ * `.env.example`, que ESTÁ TRACKEADO y va a un repo público. Un solo destino, elegido por el
+ * programa, es más seguro que un archivo elegido por una persona apurada a las tres de la mañana.
+ *
+ * Tres cosas que no hace, y cada una es deliberada:
+ * - No devuelve el valor ni lo loguea (G-002). El que llama recibe `keyState()`, que ya es una
+ *   descripción sin el valor adentro.
+ * - No acepta cualquier cosa: sin el prefijo `RGAPI-` no escribe. Pegar media key y que el
+ *   archivo quede pisado es peor que no escribir nada.
+ * - No normaliza los finales de línea: si el archivo venía CRLF se reescribe CRLF. Convertir un
+ *   archivo entero al escribir una línea es exactamente G-010.
+ *
+ * `path` existe con la misma forma que en `openDb`, y por la misma razón: sin él un test de esta
+ * función pisa el `.env` REAL de su máquina cada vez que corre `pnpm verify`, y le borra la key
+ * buena con una de mentira. Producción nunca lo pasa.
+ */
+export function writeKey(value: string, path: string = ENV_PATH): void {
+  const key = value.trim();
+  if (key === '') throw new KeyError('la key vino vacía');
+  if (!key.startsWith('RGAPI-')) {
+    throw new KeyError('eso no parece una key de Riot: tienen que empezar con RGAPI-');
+  }
+  if (/\s/.test(key)) throw new KeyError('la key tiene espacios adentro: copiala de nuevo entera');
+
+  let existing = '';
+  try {
+    existing = readFileSync(path, 'utf8');
+  } catch {
+    /* no hay .env todavía: se crea */
+  }
+  const eol = existing.includes('\r\n') ? '\r\n' : '\n';
+  const lines = existing === '' ? [] : existing.split(/\r?\n/);
+
+  let written = false;
+  const updated = lines.map((line) => {
+    if (/^\s*RIOT_API_KEY\s*=/.test(line)) {
+      written = true;
+      return `RIOT_API_KEY=${key}`;
+    }
+    return line;
+  });
+  if (!written) updated.push(`RIOT_API_KEY=${key}`);
+
+  // El archivo termina en newline, como lo dejaría un editor.
+  const body = updated.join(eol).replace(/(\r?\n)+$/, '');
+  writeFileSync(path, `${body}${eol}`, 'utf8');
 }
 
 /** Strips the key out of any string before it can reach a log or a tool response (G-002). */

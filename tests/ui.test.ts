@@ -1,8 +1,12 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tagGame, tagOf } from '../src/analysis/capture.ts';
 import { flattenMatch } from '../src/analysis/flatten.ts';
 import { escapeForCmd } from '../src/cli/ui.ts';
 import { safeAssetName } from '../src/riot/assets.ts';
+import { KeyError, writeKey } from '../src/riot/key.ts';
 import { type Db, openDb } from '../src/store/db.ts';
 import {
   finishSyncLog,
@@ -624,5 +628,47 @@ describe('las imágenes locales', () => {
 
     await new Promise<void>((r) => ui.server.close(() => r()));
     db.close();
+  });
+});
+
+describe('pegar la key desde el panel', () => {
+  // NUNCA contra el .env real: `writeKey` toma un destino por la misma razón que `openDb`, y sin
+  // eso este bloque le borraría la key buena a cada `pnpm verify`.
+  const tmp = join(tmpdir(), `lol-key-test-${process.pid}.env`);
+  afterEach(() => {
+    rmSync(tmp, { force: true });
+  });
+
+  it('escribe la key y deja el resto del archivo intacto', () => {
+    writeFileSync(tmp, 'RIOT_PLATFORM=la2\nRIOT_API_KEY=RGAPI-vieja\n# un comentario\n');
+    writeKey('RGAPI-nueva-1234', tmp);
+    const after = readFileSync(tmp, 'utf8');
+    expect(after).toContain('RIOT_API_KEY=RGAPI-nueva-1234');
+    expect(after).toContain('RIOT_PLATFORM=la2');
+    expect(after).toContain('# un comentario');
+    expect(after).not.toContain('RGAPI-vieja');
+  });
+
+  it('agrega la línea cuando el archivo existe pero no la tiene', () => {
+    writeFileSync(tmp, 'RIOT_PLATFORM=la2\n');
+    writeKey('RGAPI-nueva', tmp);
+    expect(readFileSync(tmp, 'utf8')).toContain('RIOT_API_KEY=RGAPI-nueva');
+  });
+
+  it('conserva los finales de línea CRLF en vez de convertir el archivo entero (G-010)', () => {
+    writeFileSync(tmp, 'RIOT_PLATFORM=la2\r\nRIOT_API_KEY=RGAPI-vieja\r\n');
+    writeKey('RGAPI-nueva', tmp);
+    const after = readFileSync(tmp, 'utf8');
+    expect(after).toContain('\r\n');
+    expect(after.includes('\n\n')).toBe(false);
+  });
+
+  it('rechaza lo que no parece una key ANTES de tocar el archivo', () => {
+    writeFileSync(tmp, 'RIOT_API_KEY=RGAPI-buena\n');
+    expect(() => writeKey('pegué cualquier cosa', tmp)).toThrow(KeyError);
+    expect(() => writeKey('', tmp)).toThrow(KeyError);
+    expect(() => writeKey('RGAPI-con espacio', tmp)).toThrow(KeyError);
+    // Lo que importa: media key pegada no puede dejar el archivo peor de lo que estaba.
+    expect(readFileSync(tmp, 'utf8')).toContain('RGAPI-buena');
   });
 });

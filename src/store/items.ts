@@ -72,6 +72,21 @@ export function catalogForPatch(db: Db, patch: string): ItemCatalog | null {
   return catalogFor(db, String(row['version']));
 }
 
+/**
+ * Whether a patch has a catalogue at all, without loading it.
+ *
+ * Same `LIKE patch || '.%'` predicate `catalogForPatch` uses, and shared on purpose: the panel
+ * asks this to decide whether to offer the download, and a second, hand-rolled prefix check
+ * would answer differently for a two-part version — "already have it" against a table that
+ * `catalogForPatch` will not find.
+ */
+export function hasCatalogForPatch(db: Db, patch: string): boolean {
+  const row = db
+    .prepare("SELECT 1 AS ok FROM items WHERE version LIKE ? || '.%' LIMIT 1")
+    .get(patch) as Record<string, unknown> | undefined;
+  return row !== undefined;
+}
+
 /** Which versions are cached, and how many items each holds. */
 export function catalogVersions(db: Db): { version: string; items: number; finished: number }[] {
   const rows = db
