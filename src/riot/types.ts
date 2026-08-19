@@ -141,6 +141,11 @@ export type TimelineEvent = {
   position?: Position;
   wardType?: string;
   itemId?: number;
+  /** ITEM_UNDO only: what he had before and after, plus the gold that moved. A positive
+   *  `goldGain` with a `beforeId` is a refunded PURCHASE; the mirror is an undone sale. */
+  beforeId?: number;
+  afterId?: number;
+  goldGain?: number;
   monsterType?: string;
   monsterSubType?: string;
   killerTeamId?: number;

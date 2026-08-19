@@ -229,3 +229,19 @@ CREATE TABLE IF NOT EXISTS settings (
   value  TEXT NOT NULL,
   set_at INTEGER NOT NULL
 );
+
+-- Data Dragon's item table, ONE ROW PER ITEM PER VERSION.
+--
+-- The version is part of the key on purpose: his cache spans patches 16.6 to 16.16, and an
+-- item's build path changes between them. A single "latest" table would silently reclassify
+-- items in old games, which is the scope error G-015 exists to prevent.
+CREATE TABLE IF NOT EXISTS items (
+  item_id    INTEGER NOT NULL,
+  version    TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  gold_total INTEGER NOT NULL,
+  -- 1 when nothing in that patch builds out of it. Derived from the data, never hardcoded.
+  finished   INTEGER NOT NULL,
+  tags       TEXT NOT NULL,
+  PRIMARY KEY (item_id, version)
+);

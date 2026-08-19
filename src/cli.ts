@@ -2,6 +2,7 @@ import * as cerrar from './cli/cerrar.ts';
 import * as cobertura from './cli/cobertura.ts';
 import * as growth from './cli/growth.ts';
 import * as hip from './cli/hip.ts';
+import * as items from './cli/items.ts';
 import * as page from './cli/page.ts';
 import * as prep from './cli/prep.ts';
 import * as rank from './cli/rank.ts';
@@ -41,6 +42,7 @@ const COMMANDS: Record<string, Command> = {
   growth: { summary: growth.SUMMARY, usage: growth.USAGE, run: growth.run },
   page: { summary: page.SUMMARY, usage: page.USAGE, run: page.run },
   hip: { summary: hip.SUMMARY, usage: hip.USAGE, run: hip.run },
+  items: { summary: items.SUMMARY, usage: items.USAGE, run: items.run },
   rank: { summary: rank.SUMMARY, usage: rank.USAGE, run: rank.run },
 };
 

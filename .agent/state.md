@@ -197,6 +197,31 @@ now on. ADR-019 turns that into a dated fact instead of a permanent debt.
 
 verify green, 274 tests.
 
+### S8e — item timings, the M2 cut that came back
+
+`ITEM_PURCHASED` carries an itemId and nothing else, which is why M2 cut build timings. Data
+Dragon closes it: no key, no rate limiter (different host — every request spent there is a match
+not downloaded), immutable per version. ADR-020.
+
+- `src/riot/ddragon.ts` (fetch + the pure `itemsFromJson` filter) · `items` table keyed by
+  (item_id, VERSION) · `src/store/items.ts` (`catalogForPatch` joins by `major.minor` prefix) ·
+  `src/analysis/items.ts` (`completionsOf`, `itemRace`) · `lol items` · wired into `lol report`
+  and into the panel's game cards.
+- **Eight catalogues cached**, one per patch he has actually played (14.24 to 16.16). A patch
+  with no catalogue says so instead of borrowing another patch's build paths.
+- `ITEM_UNDO` is real (ten in the first timeline inspected) and is honoured, or an undone
+  purchase dates the build early.
+- **The first reading was a trap and the aggregate caught it.** Over his last six games his first
+  item lands +3.12 min after his opponent's, which looks like a finding. Over all 42 it is
+  **+0.34 min**, and conditioned on the lane state at minute 10 it is −1.79 ahead, +1.69 even,
+  +5.04 behind: the metric is bought with gold. It is reported beside the gold curve for that
+  reason and never alone. The one shape worth watching, and NOT registered at n=10: **+1.69 min
+  late from an EVEN lane at 10**.
+- Knob swept: the 2200-gold floor gives the same answer at 2000 and 2500 and flips at 2800
+  (−0.83, n=37), so the floor is stated in the module and the sweep is on the record here.
+
+verify green, 285 tests.
+
 ## Open questions
 - **Diana**: closed by D3 as "the ledger decides", with the caveat that at n=5 needing 25, and 8
   games since he last played her, it may never reach n.

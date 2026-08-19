@@ -13,6 +13,7 @@ import {
 import { coverageOf, coverageTotals } from '../analysis/coverage.ts';
 import { stateCurve } from '../analysis/curve.ts';
 import { evaluationsOf, listHypotheses } from '../analysis/hypotheses.ts';
+import { itemRace } from '../analysis/items.ts';
 import { collectMatchups } from '../analysis/matchups.ts';
 import { deathsOf, describeDeath, expensiveMoments } from '../analysis/moments.ts';
 import { sameChampion } from '../analysis/names.ts';
@@ -22,6 +23,7 @@ import { describeRank, latestSnapshot, TRACKED_QUEUES } from '../analysis/rank.t
 import { type DeathDot, deathMapSvg, goldCurveSvg, isOwnHalf } from '../analysis/render.ts';
 import { keyState } from '../riot/key.ts';
 import type { Db } from '../store/db.ts';
+import { catalogForPatch } from '../store/items.ts';
 import {
   findAccount,
   getRawMatch,
@@ -432,6 +434,8 @@ export type MomentoPartida = {
   gano: boolean;
   tag: string | null;
   momentos: { minuto: string; linea: string; oro: number }[];
+  /** The build, his against his lane opponent's. `null` when the patch has no catalogue cached. */
+  items: { mios: string[]; suyos: string[]; primerItemMin: number | null } | null;
   sinMedir: number;
   sinTimeline: boolean;
 };
@@ -468,6 +472,7 @@ export function momentos(db: Db, cuenta: string, limite = 5): MomentoPartida[] {
         gano: row.win === 1,
         tag: tagOf(db, row.matchId, puuid),
         momentos: [],
+        items: null,
         sinMedir: 0,
         sinTimeline: true,
       });
@@ -475,6 +480,9 @@ export function momentos(db: Db, cuenta: string, limite = 5): MomentoPartida[] {
     }
 
     const { moments, unmeasurable } = expensiveMoments(match, timeline, puuid, 3);
+    // No catalogue for that patch means no item line, never another patch's build paths.
+    const catalog = catalogForPatch(db, row.patch ?? '');
+    const race = catalog === null ? null : itemRace(match, timeline, puuid, catalog);
     out.push({
       matchId: row.matchId,
       at: row.gameCreation,
@@ -483,6 +491,14 @@ export function momentos(db: Db, cuenta: string, limite = 5): MomentoPartida[] {
       gano: row.win === 1,
       tag: tagOf(db, row.matchId, puuid),
       momentos: moments.map((m) => ({ minuto: m.at, linea: m.line, oro: m.costGold })),
+      items:
+        race === null
+          ? null
+          : {
+              mios: race.mine.map((c) => `${c.at} ${c.name}`),
+              suyos: race.theirs.map((c) => `${c.at} ${c.name}`),
+              primerItemMin: race.firstGapMinutes,
+            },
       sinMedir: unmeasurable,
       sinTimeline: false,
     });

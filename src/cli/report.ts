@@ -1,5 +1,6 @@
 import { biggestSwing, phaseSplit, stateCurve } from '../analysis/curve.ts';
 import { clock } from '../analysis/events.ts';
+import { itemRace } from '../analysis/items.ts';
 import { objectivesOf, roamsOf, tempoOf, visionOf } from '../analysis/macro.ts';
 import { normaliseRole } from '../analysis/metrics.ts';
 import {
@@ -10,6 +11,7 @@ import {
   teamfights,
 } from '../analysis/moments.ts';
 import { openDb } from '../store/db.ts';
+import { catalogForPatch } from '../store/items.ts';
 import { getRawMatch, getRawTimeline, queryParticipants } from '../store/matches.ts';
 import { account as accountOf, CliError, out } from './shared.ts';
 
@@ -124,6 +126,33 @@ export function run(argv: string[]): void {
             `${(roams.byZone.mid * 100).toFixed(0)}% del tiempo en mid · ` +
             `${(roams.enemyHalf * 100).toFixed(0)}% en mitad enemiga`,
         );
+      }
+
+      // The build, beside the curve above rather than on its own: item timing is bought with
+      // gold, so the line only means something next to the state that paid for it.
+      const catalog = catalogForPatch(db, row.patch ?? '');
+      if (catalog === null) {
+        out(`   ítems: sin catálogo para el parche ${row.patch ?? '?'} — corré \`lol items\``);
+      } else {
+        const race = itemRace(match, timeline, account.puuid, catalog);
+        const paso = (c: { at: string; name: string } | null): string =>
+          c === null ? '—' : `${c.at} ${c.name}`;
+        if (race === null || race.mine.length === 0) {
+          out('   ítems: no completó ninguno');
+        } else {
+          out(`   ítems  ${race.mine.map((c) => paso(c)).join(' · ')}`);
+          out(
+            `   rival  ${race.theirs.length === 0 ? '—' : race.theirs.map((c) => paso(c)).join(' · ')}`,
+          );
+          if (race.firstGapMinutes !== null) {
+            const gap = race.firstGapMinutes;
+            out(
+              `   primer ítem ${gap >= 0 ? '+' : ''}${gap.toFixed(1)} min` +
+                `${gap > 0 ? ' (él llegó primero)' : gap < 0 ? ' (llegaste primero)' : ''}` +
+                ` (${race.mine[0]?.goldTotal ?? '?'} de oro vs ${race.theirs[0]?.goldTotal ?? '?'})`,
+            );
+          }
+        }
       }
 
       if (moments.length === 0) {

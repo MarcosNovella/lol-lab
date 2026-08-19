@@ -76,6 +76,10 @@ button.on { background: #2f4d38; border-color: var(--ok); }
 .log { color: var(--dim); font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
 .momento { font-variant-numeric: tabular-nums; padding: 3px 0; }
 .momento .min { color: var(--warn); }
+/* The build: two labelled rows, his and his opponent's, on the same grid so the minutes line up. */
+.build { display: grid; grid-template-columns: 4.5em 1fr; gap: 2px 10px; margin: 8px 0 4px;
+         font-variant-numeric: tabular-nums; font-size: 13px; }
+.build .k { color: var(--dim); }
 .tag { font-size: 12px; color: var(--dim); border: 1px solid var(--line);
        border-radius: 5px; padding: 1px 6px; margin-left: 8px; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -418,6 +422,24 @@ async function renderMomentos() {
         row.append(el('span', null, m.linea + '  [' + m.oro + ' de oro]'));
         card.append(row);
       }
+    }
+    // The build sits under the moments and above the caveats: it is the same game read from
+    // another angle, and the timing only means something next to how the game was going.
+    if (p.items && p.items.mios.length > 0) {
+      const build = el('div', 'build');
+      build.append(el('div', 'k', 'ítems'));
+      build.append(el('div', null, p.items.mios.join('  ·  ')));
+      build.append(el('div', 'k', 'rival'));
+      build.append(el('div', null, p.items.suyos.length > 0 ? p.items.suyos.join('  ·  ') : '—'));
+      card.append(build);
+      if (p.items.primerItemMin !== null) {
+        const g = p.items.primerItemMin;
+        card.append(el('div', 'porque',
+          'primer ítem ' + (g >= 0 ? '+' : '') + g.toFixed(1) + ' min' +
+          (g > 0 ? ' — él llegó primero' : g < 0 ? ' — llegaste primero' : ' — empate')));
+      }
+    } else if (p.items === null && !p.sinTimeline) {
+      card.append(el('div', 'porque', 'ítems: falta el catálogo de ese parche (lol items)'));
     }
     if (p.sinMedir > 0) {
       card.append(el('div', 'porque',

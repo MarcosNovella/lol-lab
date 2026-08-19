@@ -76,7 +76,12 @@ acordarse, no observar — el software anota cuánto tardaste, así que no se me
 
 Si preferís la terminal, `pnpm lol cerrar` hace el mismo ritual con una tecla por partida
 (`y` la produje yo · `i` salía igual · `p` estuvo pareja). `pnpm lol` solo lista todo lo demás:
-`report`, `prep`, `cobertura`, `growth`, `page`, `hip`, `rank`.
+`report`, `prep`, `cobertura`, `growth`, `page`, `hip`, `rank`, `items`.
+
+`pnpm lol items` es de una sola vez por parche: baja la tabla de ítems de Data Dragon (sin key,
+sin rate limit, un catálogo por parche que hayas jugado) y con eso el reporte y el panel pueden
+decirte cuándo completaste cada ítem y cuándo lo completó tu rival de línea. Después de un parche
+nuevo, corrélo una vez.
 
 ## Las tools
 
