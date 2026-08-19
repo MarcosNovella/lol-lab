@@ -52,8 +52,10 @@ Para dejar de rotarla, pedí una **Personal API Key** en el mismo portal
 
 ## El ritual
 
-Cuando terminás de jugar, **doble click a `lol-ui.bat`** (hacele un acceso directo en el
-escritorio la primera vez). Desde la terminal es `pnpm lol ui`.
+Cuando terminás de jugar, **doble click a `lol-ui.bat`**. Desde la terminal es `pnpm lol ui`.
+
+El acceso directo del escritorio ya está hecho y apunta acá; si alguna vez hay que rehacerlo,
+el icono es `assets/lol-lab.ico` y el destino es este `.bat` con el repo como carpeta de inicio.
 
 Abre el panel en el navegador y a partir de ahí no volvés a la terminal. Arriba te dice **qué
 hacer ahora** y por qué; abajo están el botón de sincronizar con su barra de progreso, las
