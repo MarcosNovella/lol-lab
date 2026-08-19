@@ -18,9 +18,17 @@ import {
 } from '../analysis/capture.ts';
 import { coverageOf, coverageTotals } from '../analysis/coverage.ts';
 import { type PhaseSplit, phaseAverages, phaseSplit, stateCurve } from '../analysis/curve.ts';
+import {
+  DEFAULT_WINDOW,
+  type GrowthCurve,
+  GrowthError,
+  growthCurve,
+  trendSlope,
+} from '../analysis/growth.ts';
 import { evaluationsOf, listHypotheses } from '../analysis/hypotheses.ts';
 import { itemRace } from '../analysis/items.ts';
 import { collectMatchups } from '../analysis/matchups.ts';
+import type { Role } from '../analysis/metrics.ts';
 import { deathsOf, describeDeath, expensiveMoments } from '../analysis/moments.ts';
 import { sameChampion } from '../analysis/names.ts';
 import { confidenceOf, prepMatchup } from '../analysis/prep.ts';
@@ -30,6 +38,7 @@ import {
   type DeathDot,
   deathMapSvg,
   goldCurveSvg,
+  growthCurveSvg,
   isOwnHalf,
   type MetricBar,
   metricBarsSvg,
@@ -857,7 +866,38 @@ export type Lectura = {
   conTimeline: number;
   /** null hasta que exista el primer tag: la sección no se dibuja vacía. */
   tags: RepartoPorTag | null;
+  /** null cuando no hay suficientes partidas con la métrica para dibujar una curva. */
+  crecimiento: Crecimiento | null;
   notas: string[];
+};
+
+export type Crecimiento = {
+  metrica: string;
+  ventana: number;
+  puntos: number;
+  /** Partidas descartadas por no tener la métrica o no tener rival de línea. Nunca en silencio. */
+  descartadas: number;
+  /**
+   * Pendiente ajustada sobre la diferencia CRUDA partida a partida, por partida.
+   *
+   * Cruda y no suavizada a propósito: es la estimación que no depende de una perilla.
+   */
+  pendiente: number;
+  /**
+   * La misma pendiente ajustada sobre la diferencia SUAVIZADA, por ventana.
+   *
+   * Es lo único que la ventana mueve, y por eso es lo que dice si la tendencia se puede leer.
+   */
+  barrido: { ventana: number; pendiente: number }[];
+  /**
+   * true cuando el signo cambia según la ventana: entonces NO hay tendencia que leer.
+   *
+   * Es la lección más cara del proyecto puesta en un booleano. El "-0.147 por partida" que casi
+   * entró al ledger como predicción fechada era dos puntas de una media móvil; ajustado sobre
+   * los 39 puntos da +0.030, el signo opuesto (G-025).
+   */
+  inestable: boolean;
+  svg: string;
 };
 
 export type RepartoPorTag = {
@@ -985,6 +1025,10 @@ export function lectura(db: Db, cuenta: string, limite = 40): Lectura {
           minimo: MIN_GAMES,
         };
 
+  // ¿Estoy mejorando? La única métrica causal continua que hay, y el rival dibujado debajo
+  // porque es lo único que separa "mejoré" de "me tocaron rivales peores" (ADR-012).
+  const crecimiento = crecimientoDe(db, puuid, label, rol);
+
   return {
     cuenta: label,
     rol: result.role === 'todos' ? 'todos los roles' : roleLabel(result.role),
@@ -1032,6 +1076,80 @@ export function lectura(db: Db, cuenta: string, limite = 40): Lectura {
     conTimeline,
     minimo: MIN_GAMES,
     tags,
+    crecimiento,
     notas: result.notes,
+  };
+}
+
+/**
+ * La curva de crecimiento y el barrido que decide si se puede leer.
+ *
+ * El barrido no es opcional. Sin él esta sección diría "vas mejorando +0.030 por partida" con
+ * cara de hallazgo, y sobre sus datos reales ese mismo número es +0.083 con ventana 5 y −0.015
+ * con ventana 20: el signo cambia, así que la respuesta honesta es "todavía no hay tendencia que
+ * leer" (G-025). Correr tres ventanas cuesta tres consultas locales sobre ≤40 partidas.
+ */
+function crecimientoDe(db: Db, puuid: string, label: string, rol: Role | null): Crecimiento | null {
+  const VENTANAS = [5, DEFAULT_WINDOW, 20];
+  const base = {
+    puuid,
+    accountLabel: label,
+    metricKey: 'cs_first_10',
+    queueId: QUEUE.soloq,
+    ...(rol !== null ? { role: rol } : {}),
+  };
+
+  let principal: GrowthCurve;
+  try {
+    principal = growthCurve(db, { ...base, window: DEFAULT_WINDOW });
+  } catch (error) {
+    // `growthCurve` se niega a curvar una métrica contaminada (G-008). Si eso pasa es un defecto
+    // de esta llamada, no un estado del usuario, así que no se traga.
+    if (error instanceof GrowthError) throw error;
+    throw error;
+  }
+  if (principal.points.length < 2) return null;
+
+  // La pendiente que se ENUNCIA se ajusta sobre la diferencia CRUDA partida a partida: sin
+  // suavizar no hay artefacto de suavizado del que sospechar, y es la estimación honesta.
+  const pendiente = trendSlope(principal.points, (p) => p.mine - p.theirs);
+
+  // El barrido se ajusta sobre la diferencia SUAVIZADA, que es lo único que la ventana cambia.
+  // La primera versión de esto barría sobre los valores crudos y devolvía el mismo número en
+  // las tres ventanas — un barrido que no barre, con toda la cara de haber verificado algo.
+  const barrido = VENTANAS.map((ventana) => ({
+    ventana,
+    pendiente: trendSlope(
+      ventana === DEFAULT_WINDOW
+        ? principal.points
+        : growthCurve(db, { ...base, window: ventana }).points,
+      (p) => p.mineRolling - p.theirsRolling,
+    ),
+  }));
+
+  const signos = new Set(
+    [pendiente, ...barrido.map((b) => b.pendiente)]
+      .filter(Number.isFinite)
+      .map((v) => Math.sign(v)),
+  );
+
+  return {
+    metrica: principal.metricLabel,
+    ventana: principal.window,
+    puntos: principal.points.length,
+    descartadas: principal.skipped,
+    pendiente,
+    barrido,
+    // Más de un signo entre el ajuste crudo y el barrido: la tendencia es un artefacto de cómo
+    // se la mira, y entonces no hay tendencia que leer.
+    inestable: signos.size > 1,
+    svg: growthCurveSvg(
+      principal.points.map((p) => ({
+        index: p.index,
+        mineRolling: p.mineRolling,
+        theirsRolling: p.theirsRolling,
+        win: p.win,
+      })),
+    ),
   };
 }

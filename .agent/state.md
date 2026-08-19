@@ -402,6 +402,27 @@ verify verde, 334 tests.
 
 verify verde, 340 tests.
 
+### S9f — la curva de crecimiento, con su barrido al lado
+
+- **"¿Estoy mejorando?" está en el panel** (ADR-030). Su media móvil de CS@10 contra la de su
+  rival de línea, partida a partida, con el rival en gris punteado abajo: es el nivel del lobby
+  (ADR-012), lo único que separa "mejoré" de "me tocaron rivales peores".
+- **No se dibuja ninguna recta de tendencia.** Una recta afirmaría con una forma lo que el
+  párrafo de abajo retracta, y la forma se lee primero. El número va en el texto, donde se puede
+  calificar.
+- **La pendiente que se enuncia se ajusta sobre la diferencia CRUDA** (ninguna perilla la mueve);
+  **el barrido se ajusta sobre la SUAVIZADA** a 5/10/20, que es lo único que la ventana mueve. Si
+  los signos no coinciden, el panel dice "todavía no hay tendencia que leer" en vez de una
+  pendiente.
+- **G-034, y es el defecto de la sesión.** La primera versión barría sobre los valores crudos, así
+  que las tres ventanas devolvían +0.1538 EXACTAMENTE y el panel mostraba "mismo signo en las
+  tres" con total seguridad. Un barrido atado a algo que la perilla no toca: parecía la evidencia
+  más fuerte posible de estabilidad y no era evidencia de nada. Lo vi leyendo los tres números
+  idénticos en el payload; los tests pasaban todos, porque asertaban la FORMA del barrido (tres
+  ventanas, pendientes finitas) y no que los valores difirieran.
+
+verify verde, 343 tests.
+
 ### Lo que la lectura TODAVÍA no muestra
 - El reparto por tag ya está, pero **sobre su caché real va a mostrar cero** hasta que tague:
   el backlog se cerró por decisión (ADR-019) y el tagueo arranca con su próxima partida.

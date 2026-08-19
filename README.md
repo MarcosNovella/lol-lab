@@ -82,6 +82,15 @@ afuera**: su promedio está dominado por las partidas que ganaste, así que sirv
 no para encabezar nada. Si ninguna métrica se destaca de verdad, no titula nada en vez de
 inventar un titular.
 
+Y **la curva de crecimiento**: tu media móvil de CS a los 10 contra la de tu rival de línea,
+partida a partida. El rival va en gris punteado abajo porque es el nivel del lobby que te tocó —
+lo único que separa "mejoré" de "me tocaron rivales peores".
+
+No vas a ver una recta de tendencia dibujada, a propósito. Debajo está la pendiente ajustada y la
+misma pendiente suavizando con 5, 10 y 20 partidas: **si el signo cambia entre esas, no hay
+tendencia que leer** y el panel lo dice así. Ese error ya se cometió una vez acá — un "-0.147 por
+partida" que ajustado sobre todos los puntos era +0.030, el signo opuesto.
+
 Si el panel encuentra más de una cuenta, arriba de todo hay un **selector**: arranca en la que
 sincronizaste último y se acuerda de cuál elegiste. El récord nunca se mezcla entre cuentas.
 

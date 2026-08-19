@@ -872,6 +872,35 @@ async function renderLectura() {
     'está el número del rival al lado del tuyo y no la diferencia sola. ' +
     'Sale de ' + l.conTimeline + ' partidas con timeline en caché.'));
 
+  // ¿Estoy mejorando? La curva, y el barrido que decide si se puede leer o no.
+  if (l.crecimiento) {
+    const c = l.crecimiento;
+    const card = el('div', 'card');
+    card.append(el('div', 'porque', c.metrica + ', media móvil de ' + c.ventana + ' partidas'));
+    const holder = el('div');
+    holder.innerHTML = c.svg;
+    card.append(holder);
+    box.append(card);
+
+    const signo = c.pendiente >= 0 ? '+' : '';
+    const barrido = c.barrido
+      .map((b) => (b.pendiente >= 0 ? '+' : '') + b.pendiente.toFixed(3))
+      .join(' / ');
+    const ventanas = c.barrido.map((b) => b.ventana).join(' / ');
+    box.append(el('div', 'guardada', c.inestable
+      ? 'TODAVÍA NO HAY TENDENCIA QUE LEER. Ajustada sobre los ' + c.puntos + ' puntos da ' +
+        signo + c.pendiente.toFixed(3) + ' por partida, pero suavizando con ' + ventanas +
+        ' partidas da ' + barrido + ': el signo cambia según cómo se mire, así que es un ' +
+        'artefacto del suavizado y no una mejora. Se dibujan las dos series y ninguna recta ' +
+        'de tendencia, porque una recta afirmaría con una forma lo que este párrafo retracta.'
+      : 'Ajustada sobre los ' + c.puntos + ' puntos: ' + signo + c.pendiente.toFixed(3) +
+        ' por partida. Con ventanas de ' + ventanas + ' partidas da ' + barrido +
+        ', mismo signo en las tres.' +
+        (c.descartadas > 0
+          ? ' ' + c.descartadas + ' partidas descartadas por no tener la métrica o rival de línea.'
+          : '')));
+  }
+
   // El reparto por tag. NO se dibuja hasta que exista el primer tag: una sección con tres ceros
   // se lee como "no pasa nada acá" en vez de "todavía no hay nada que leer".
   if (l.tags) {

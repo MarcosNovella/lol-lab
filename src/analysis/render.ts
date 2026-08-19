@@ -345,8 +345,83 @@ ${barras}
 </svg>`;
 }
 
+export type GrowthDot = {
+  /** Posición dentro de la historia de ESTA cuenta. El eje x son partidas, no fechas. */
+  index: number;
+  mineRolling: number;
+  theirsRolling: number;
+  win: boolean;
+};
+
 /**
- * The CSS the SVG builders REQUIRE, and the variables it reads.""""""
+ * La curva de crecimiento: su media móvil contra la de su rival de línea, partida a partida.
+ *
+ * Dos series y NINGUNA línea de tendencia dibujada, que es la decisión que importa. Ajustar una
+ * recta acá y dibujarla sería afirmar con una forma lo que el texto de al lado tiene que
+ * retractar: sobre sus datos reales la pendiente es +0.083 / +0.030 / −0.015 según se suavice
+ * con 5, 10 o 20 partidas — el signo CAMBIA, así que no hay tendencia que leer (G-025). El
+ * número y su barrido van en la leyenda, donde se pueden calificar; el dibujo muestra las dos
+ * series y deja que la forma hable.
+ *
+ * El rival va abajo como referencia y no como rival: es el nivel del lobby que le tocó (ADR-012),
+ * que es lo único que separa "mejoré" de "me tocaron rivales peores". Por eso va en gris y
+ * punteado — es el fondo contra el que se lee su línea, no una segunda cosa que compite.
+ */
+export function growthCurveSvg(dots: GrowthDot[], width = 720, height = 220): string {
+  if (dots.length < 2) {
+    return `<svg viewBox="0 0 ${width} 40" width="100%"><text class="tag" x="8" y="22">hacen falta al menos dos partidas para dibujar una curva</text></svg>`;
+  }
+
+  const padL = 34;
+  const padR = 58;
+  const padT = 16;
+  const padB = 22;
+
+  const valores = dots.flatMap((d) => [d.mineRolling, d.theirsRolling]).filter(Number.isFinite);
+  const min = Math.min(...valores);
+  const max = Math.max(...valores);
+  // Un piso de rango: sin él, dos series que difieren en 0.2 llenan el alto y se leen como un
+  // abismo. El eje se abre a lo que haya, nunca menos de esto.
+  const span = Math.max(2, max - min);
+  const centro = (max + min) / 2;
+  const desde = centro - span / 2;
+  const hasta = centro + span / 2;
+
+  const x = (index: number): number => {
+    const primero = dots[0]?.index ?? 0;
+    const ultimo = dots[dots.length - 1]?.index ?? 1;
+    const rango = Math.max(1, ultimo - primero);
+    return padL + ((index - primero) / rango) * (width - padL - padR);
+  };
+  const y = (valor: number): number =>
+    height - padB - ((valor - desde) / (hasta - desde)) * (height - padT - padB);
+
+  const linea = (pick: (d: GrowthDot) => number): string =>
+    dots
+      .filter((d) => Number.isFinite(pick(d)))
+      .map((d) => `${x(d.index).toFixed(1)},${y(pick(d)).toFixed(1)}`)
+      .join(' ');
+
+  const ultimo = dots[dots.length - 1];
+  const etiquetas =
+    ultimo === undefined
+      ? ''
+      : `<text class="serielabel mia" x="${(x(ultimo.index) + 6).toFixed(1)}" y="${(y(ultimo.mineRolling) + 4).toFixed(1)}">vos</text>` +
+        `<text class="serielabel suya" x="${(x(ultimo.index) + 6).toFixed(1)}" y="${(y(ultimo.theirsRolling) + 4).toFixed(1)}">rival</text>`;
+
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="Tu media móvil contra la de tu rival de línea, partida a partida">
+  <text class="tag" x="2" y="${(padT + 4).toFixed(1)}">${hasta.toFixed(1)}</text>
+  <text class="tag" x="2" y="${(height - padB + 4).toFixed(1)}">${desde.toFixed(1)}</text>
+  <text class="tag" x="${padL}" y="${height - 4}">partida ${dots[0]?.index ?? 1}</text>
+  <text class="tag" x="${width - padR}" y="${height - 4}" text-anchor="end">${ultimo?.index ?? ''}</text>
+  <polyline class="serie suya" points="${linea((d) => d.theirsRolling)}"/>
+  <polyline class="serie mia" points="${linea((d) => d.mineRolling)}"/>
+${etiquetas}
+</svg>`;
+}
+
+/**
+ * The CSS the SVG builders REQUIRE, and the variables it reads."""""""""
  *
  * Exported and shared, not copied. The builders emit `class="plot"`, `class="own"` and so on and
  * carry no presentation of their own, so an SVG pasted into a document that lacks these rules
@@ -377,6 +452,14 @@ path.bar.mejor { fill: var(--better); }
 path.bar.peor  { fill: var(--worse); }
 text.barlabel { fill: var(--fg); font-size: 12px; }
 text.barvalue { fill: var(--muted); font-size: 11px; }
+/* La curva de crecimiento. La suya es la línea; la del rival es el fondo contra el que se lee,
+   así que va gris y punteada: es el nivel del lobby, no un contrincante (ADR-012). */
+polyline.serie { fill: none; stroke-width: 2; }
+polyline.serie.mia { stroke: var(--better); }
+polyline.serie.suya { stroke: var(--grid); stroke-dasharray: 5 4; }
+text.serielabel { font-size: 11px; }
+text.serielabel.mia { fill: var(--better); }
+text.serielabel.suya { fill: var(--muted); }
 `;
 
 /**

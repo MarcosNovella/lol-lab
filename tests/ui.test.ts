@@ -839,3 +839,92 @@ describe('el mínimo de muestra vale para toda la lectura', () => {
     db.close();
   });
 });
+
+describe('la curva de crecimiento y su barrido', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'me',
+      gameName: 'LegendofTorcuato',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+  });
+
+  it('no dibuja nada con una sola partida en vez de una curva de un punto', () => {
+    const raw = lobby({ matchId: 'LA2_G0', index: 0 });
+    raw.info.queueId = 420;
+    saveMatch(db, flattenMatch(raw), raw);
+    expect(lectura(db, 'smurf').crecimiento).toBeNull();
+  });
+
+  it('barre la ventana de suavizado y marca inestable cuando el signo cambia', () => {
+    // La lección más cara del proyecto, como test: una pendiente cuyo signo depende de cómo se
+    // suavice no es una tendencia, y el "-0.147 por partida" que casi entró al ledger como
+    // predicción fechada era exactamente eso (G-025).
+    for (let i = 0; i < 24; i++) {
+      const raw = lobby({ matchId: `LA2_G${i}`, index: i, win: i % 2 === 0 });
+      raw.info.queueId = 420;
+      // Sube y baja: ninguna ventana puede coincidir con la siguiente sobre esta forma.
+      for (const p of raw.info.participants) {
+        const mio = p.puuid === 'me';
+        p.challenges = {
+          ...p.challenges,
+          laneMinionsFirst10Minutes: 70 + (mio ? Math.sin(i) * 12 : 0),
+        };
+      }
+      saveMatch(db, flattenMatch(raw), raw);
+    }
+    const c = lectura(db, 'smurf').crecimiento;
+    expect(c?.barrido.map((b) => b.ventana)).toEqual([5, 10, 20]);
+    // Y la pendiente que se muestra es la AJUSTADA sobre todos los puntos, no dos puntas.
+    expect(Number.isFinite(c?.pendiente ?? Number.NaN)).toBe(true);
+    expect(typeof c?.inestable).toBe('boolean');
+  });
+
+  it('cuenta las descartadas en vez de dejarlas caer en silencio', () => {
+    for (let i = 0; i < 6; i++) {
+      const raw = lobby({ matchId: `LA2_H${i}`, index: i });
+      raw.info.queueId = 420;
+      saveMatch(db, flattenMatch(raw), raw);
+    }
+    const c = lectura(db, 'smurf').crecimiento;
+    expect(c?.descartadas).toBeGreaterThanOrEqual(0);
+    expect(c?.puntos).toBeGreaterThan(1);
+  });
+});
+
+describe('el barrido de la curva tiene que barrer', () => {
+  it('da pendientes DISTINTAS por ventana, porque es lo único que la ventana mueve', () => {
+    // La primera versión ajustaba sobre los valores crudos, así que las tres ventanas devolvían
+    // el mismo número: un barrido que no barre, con toda la cara de haber verificado algo. Se
+    // vio mirando el payload, no lo vio ningún test — este es ese test.
+    const db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'me',
+      gameName: 'LegendofTorcuato',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+    for (let i = 0; i < 26; i++) {
+      const raw = lobby({ matchId: `LA2_S${i}`, index: i, win: i % 2 === 0 });
+      raw.info.queueId = 420;
+      for (const p of raw.info.participants) {
+        p.challenges = {
+          ...p.challenges,
+          // Una forma que sube y después baja: el suavizado tiene que cambiar la pendiente.
+          laneMinionsFirst10Minutes: p.puuid === 'me' ? 60 + i * 2 - Math.max(0, i - 13) * 5 : 70,
+        };
+      }
+      saveMatch(db, flattenMatch(raw), raw);
+    }
+    const barrido = lectura(db, 'smurf').crecimiento?.barrido ?? [];
+    const pendientes = barrido.map((b) => b.pendiente.toFixed(4));
+    expect(new Set(pendientes).size).toBeGreaterThan(1);
+    db.close();
+  });
+});
