@@ -106,7 +106,46 @@ export type GrowthSpec = {
   rollingGames: number;
 };
 
-export type Spec = AnalysisSpec | VisionSpec | TeamStateSpec | GrowthSpec;
+/**
+ * A hypothesis about a PHASE of the game — how often he dies inside a window of minutes, and
+ * whether the games where that rate is high are the games he loses.
+ *
+ * It exists because the phase reading of 2026-08-16 ("the deaths gap between wins and losses
+ * peaks in the mid phase, 1.14 against 2.71") is not registrable as it stands: it splits on the
+ * RESULT, which is the thing being predicted, and dying and losing cause each other. Three
+ * decisions make it a legitimate question instead of that one:
+ *
+ * - The GATE. Only games he reaches `gateMinute` with more than `band` gold of lane lead are
+ *   counted, so the comparison starts from a state he actually earned rather than from every
+ *   game he happened to lose. It is the same gate `team_state_dominates_500g` uses.
+ * - The RATE, not the count. Deaths are divided by the minutes of the phase the game actually
+ *   reached, because a game that ends at 19' offers six minutes of exposure and one that goes to
+ *   40' offers eleven. A raw count would mostly measure duration, and duration is downstream of
+ *   the result (G-008).
+ * - The THRESHOLD is frozen, because "high-death games" is otherwise a knob to be turned until
+ *   the split flatters the claim. It is swept at registration like every other knob (G-011).
+ *
+ * What it still cannot settle, and the caveat has to say so: reverse causality. Losing a won
+ * game and dying in the mid phase are the same story told twice, and no observational split of
+ * his own games can separate "the deaths caused the loss" from "the loss was already happening".
+ */
+export type PhaseSpec = {
+  puuid: string;
+  role: Role;
+  queueId: number;
+  /** Minute the lane gate is read at. */
+  gateMinute: number;
+  /** Only games he is ahead by more than this at `gateMinute`. 0 admits every game. */
+  band: number;
+  /** Phase start, inclusive, in minutes. */
+  fromMinute: number;
+  /** Phase end, exclusive, in minutes. Clamped to the last whole minute the game reached. */
+  toMinute: number;
+  /** Deaths per 10 minutes of phase at or above which a game counts as high-death. */
+  deathsPer10Threshold: number;
+};
+
+export type Spec = AnalysisSpec | VisionSpec | TeamStateSpec | GrowthSpec | PhaseSpec;
 
 /**
  * Canonical JSON over the spec's OWN keys, sorted.

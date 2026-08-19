@@ -10,8 +10,16 @@ import { openDb } from '../src/store/db.ts';
 import { findAccount } from '../src/store/matches.ts';
 
 /**
- * Registers the three Fase 0 findings as dated predictions. One-shot: the ledger is
- * append-only, so a second run reports what already exists and changes nothing.
+ * Registers findings as dated predictions. One-shot per id: the ledger is append-only, so a
+ * second run reports what already exists and changes nothing. It grows as claims arrive — the
+ * three Fase 0 ones, then the vision window, then `team_state_dominates` on 2026-08-18.
+ *
+ * ONE claim that was queued for registration is deliberately absent. `growth_drift` (his CS@10
+ * gap decaying at -0.147 per game) did not survive the sweep its own registration required:
+ * the number was the first and last point of a rolling mean, and a line fitted over all 39
+ * points comes out at +0.030, the opposite sign, flipping again by window (G-025). There is no
+ * direction to predict, so nothing is registered. The measure stays — it is the estimator that
+ * changed, and it will have something to say when there are enough games for a trend to exist.
  *
  * Two boundaries, not one:
  * - BASELINE_UNTIL freezes the corpus the claims were actually made on (36 mid soloq games,
@@ -63,6 +71,17 @@ const SPECS: Record<string, Spec> = {
     stratum: 'lane_even_or_behind',
     champion: 'Diana',
   },
+  team_state_dominates_500g: {
+    puuid: smurf.puuid,
+    role: 'MIDDLE',
+    queueId: 420,
+    minute: 14,
+    band: 500,
+    // 500g across the four teammates is the same band his own lane uses, and it is the
+    // CONSERVATIVE cell of the sweep rather than the flattering one: every wider team band
+    // reports a bigger gap (0.389 at 1000, 0.467 at 1500, 0.667 at 2000).
+    teamBand: 500,
+  },
 };
 
 const CLAIMS: Record<
@@ -99,6 +118,24 @@ const CLAIMS: Record<
     nNeeded: 800,
     caveat:
       'Registered to settle an argument with data. Roadmap 4.2 reasoned that a continuous outcome would extract more signal from the same games; measured, its standardised effect is d = -0.14, so it needs MORE games than the binary version, not fewer. If that reasoning was right this hypothesis should resolve first; it is registered precisely so the prediction is on the record either way. Shares the derived-opponent and told-him caveats of lead_conversion_gap, and flips sign at the same place in a minute sweep.',
+  },
+  team_state_dominates_500g: {
+    claim:
+      'Among games he is >500g AHEAD in lane at minute 14, his win rate with the REST of his team ahead by >500g is HIGHER than with the rest of his team behind by >500g.',
+    direction: 'higher',
+    // h = 0.73 on the baseline, so ~15 per group would settle the gap actually observed. 88 is
+    // the n for a 20-point gap instead of a 33-point one: an in-sample effect is the largest
+    // the data allows, and it shrinks out of sample. About 20 of every 39 mid soloq games land
+    // in one of the two buckets, so this is months, not weeks -- but it is reachable, which is
+    // more than lead_conversion_gap can say.
+    nNeeded: 88,
+    caveat:
+      'BOTH BANDS SWEPT (G-011), frozen corpus, minute 14: over teamBand 250/500/1000/1500/2000 the gap runs 0.318 / 0.318 / 0.389 / 0.467 / 0.667 (n 19/19/15/8/7), and over lane band 0/300/500/750/1000 at teamBand 500 it runs 0.446 / 0.389 / 0.318 / 0.300 / 0.178. Minutes 12/14/16 at the registered cell give 0.304 / 0.318 / 0.524. Every one of the 75 cells is POSITIVE, in the frozen corpus and in the full cache alike -- the opposite of lead_conversion_gap, whose sign flipped between adjacent minutes. The registered cell is among the smallest of the grid, chosen so a later verdict cannot be an artefact of knob-picking. ' +
+      'HOW MUCH OF THIS IS MECHANICAL: a team that is ahead wins more, so the SIGN is close to guaranteed and what is really on the record is the SIZE. It is worth tracking because the useful movement is DOWNWARD -- if he learns to close a game from a lane lead, his dependence on the rest of the map should shrink, and this number is where that would show. ' +
+      'THE NAME OVERSTATES IT, and the mirror was measured rather than assumed: from lane-BEHIND games the same split gives 3/6 against 0/5, a gap of the same order, so team state is not doing something special to his lane leads. ' +
+      'CONFOUND: `restOfTeamGoldDiff` removes his own lane pair (A3, r = 0.65 with laneGoldDiff was why this was unregisterable before), but the remaining gold is not exogenous either -- a mid who converts a lead by roaming makes his teammates richer, so part of "team ahead" is him. ' +
+      'THE ID CARRIES A HISTORY: this was first registered as `team_state_dominates` on a cache that stopped at 2026-08-16, so its declared hole counted 3 states when the truth was 7 -- six games of 2026-08-17 had been played and not yet downloaded. It was retired at n=0, nothing was lost, and this registration ran immediately after a sync so the hole is counted against every game that exists. The lesson is general and now a rule: SYNC BEFORE REGISTERING (G-027). ' +
+      'On the full cache after that sync the same cell reads 10/13 against 4/8, a gap of 0.269 rather than the frozen 0.318 -- the direction is what is registered, and the size is already drifting inside the noise the n implies.',
   },
   diana_needs_a_lead: {
     claim: 'On Diana, his win rate from a neutral-or-behind lane state at 14 is BELOW a coin flip.',
@@ -156,6 +193,12 @@ for (const [id, spec] of Object.entries(SPECS)) {
     }
     if ('rollingGames' in s) {
       return `métrica ${s.metricKey} ventana ${s.rollingGames} partidas  ${s.role}/${s.queueId}`;
+    }
+    if ('deathsPer10Threshold' in s) {
+      return (
+        `fase ${s.fromMinute}-${s.toMinute} corte ${s.deathsPer10Threshold} muertes/10min  ` +
+        `puerta: banda ${s.band} al minuto ${s.gateMinute}  ${s.role}/${s.queueId}`
+      );
     }
     return (
       `minuto ${s.minute} banda ${s.band}  ${s.role}/${s.queueId}  outcome=${s.outcome} ` +

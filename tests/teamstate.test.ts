@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { flattenMatch } from '../src/analysis/flatten.ts';
-import { drift, growthCurve } from '../src/analysis/growth.ts';
-import type { GrowthSpec, TeamStateSpec } from '../src/analysis/hypotheses.ts';
+import { drift, type GrowthPoint, growthCurve, trendSlope } from '../src/analysis/growth.ts';
+import type { GrowthSpec, PhaseSpec, TeamStateSpec } from '../src/analysis/hypotheses.ts';
 import { specHash } from '../src/analysis/hypotheses.ts';
 import { countGapGames, standardMeasure } from '../src/analysis/measures.ts';
 import { laneStateAt } from '../src/analysis/state.ts';
@@ -31,6 +31,10 @@ type Game = {
   /** His `laneMinionsFirst10Minutes`, and his lane opponent's. */
   myCs10?: number;
   theirCs10?: number;
+  /** Minutes at which HE dies, for the phase measure. Empty by default. */
+  deathMinutes?: number[];
+  /** Last whole minute the game reaches. Defaults to the measured minute, as before. */
+  endMinute?: number;
 };
 
 /** participantId 1 = him, 2 = enemy mid, 3-6 = his allies, 7-10 = the other enemies. */
@@ -114,6 +118,20 @@ function timelineOf(game: Game): TimelineDto {
     }
     return { timestamp: minute * 60_000, participantFrames: frames };
   };
+  // Frames run to `endMinute` so the phase measure can read the game's real extent from the last
+  // frame's TIMESTAMP (G-017). Default is the measured minute, which is what every test that
+  // predates the phase spec was already getting.
+  const end = game.endMinute ?? MINUTE;
+  const frames = [frame(0), frame(MINUTE)];
+  for (let minute = MINUTE + 1; minute <= end; minute += 1) frames.push(frame(minute));
+  const deaths = (game.deathMinutes ?? []).map((minute) => ({
+    type: 'CHAMPION_KILL',
+    timestamp: Math.round(minute * 60_000),
+    killerId: 2,
+    victimId: 1,
+    bounty: 300,
+    position: { x: 7000, y: 7000 },
+  }));
   return {
     metadata: { matchId: game.id, participants: ROLES.flatMap((r) => [r, r]).map(() => '') },
     info: {
@@ -124,7 +142,10 @@ function timelineOf(game: Game): TimelineDto {
           puuid: puuidOf(game, role, mine),
         })),
       ),
-      frames: [frame(0), frame(MINUTE)],
+      frames:
+        deaths.length === 0
+          ? frames
+          : frames.map((f, i) => (i === 0 ? { ...f, events: deaths } : f)),
     },
   };
 }
@@ -250,8 +271,8 @@ describe('growth_drift measure', () => {
     expect(result.n).toBe(4);
     expect(result.effect).toBeGreaterThan(0);
 
-    // And it is exactly the difference of the two drifts the curve reports, computed by the
-    // same `drift` the growth command uses rather than by a second copy of the arithmetic.
+    // And it is exactly the difference of the two fitted slopes, computed by the same
+    // `trendSlope` the ledger uses rather than by a second copy of the arithmetic.
     const curve = growthCurve(db, {
       puuid: 'me',
       accountLabel: 'me',
@@ -261,9 +282,46 @@ describe('growth_drift measure', () => {
       window: 1,
     });
     expect(result.effect).toBeCloseTo(
-      drift(curve.points, (p) => p.mineRolling) - drift(curve.points, (p) => p.theirsRolling),
+      trendSlope(curve.points, (p) => p.mineRolling) -
+        trendSlope(curve.points, (p) => p.theirsRolling),
       10,
     );
+  });
+
+  it('fits every point, so one more game cannot multiply the effect (G-025)', () => {
+    // His gap is flat at +20 for nine games and then one game lands at +2. The endpoint reading
+    // charges the whole 18-point fall to the series and reports a slope; the fitted line sees
+    // nine points saying "flat" and one saying "not". This is the real 36-vs-39-game swing in
+    // miniature, and it is why the ledger measure fits rather than subtracts.
+    const gaps = [20, 20, 20, 20, 20, 20, 20, 20, 20, 2];
+    gaps.forEach((gap, i) => {
+      seed(db, {
+        id: `LA2_S${i}`,
+        at: 1000 + i * 1000,
+        win: true,
+        laneLead: 0,
+        restLead: 0,
+        myCs10: 60 + gap,
+        theirCs10: 60,
+      });
+    });
+
+    const curve = growthCurve(db, {
+      puuid: 'me',
+      accountLabel: 'me',
+      metricKey: 'cs_first_10',
+      role: 'MIDDLE',
+      queueId: 420,
+      window: 1,
+    });
+    const gapOf = (p: GrowthPoint): number => p.mineRolling - p.theirsRolling;
+
+    // Endpoints only: (2 - 20) / 9 = -2 per game, as if every game had shed two CS.
+    expect(drift(curve.points, gapOf)).toBeCloseTo(-2, 10);
+    // Fitted: the same fall, spread over ten points that mostly disagree with it.
+    const fitted = trendSlope(curve.points, gapOf);
+    expect(fitted).toBeGreaterThan(-1);
+    expect(Math.abs(fitted)).toBeLessThan(Math.abs(drift(curve.points, gapOf)) / 2);
   });
 
   it('honours the ledger window instead of spanning baseline and test', () => {
@@ -324,5 +382,182 @@ describe('the ledger absorbs new shapes without disturbing the old ones', () => 
     expect(specHash({ ...TEAM_SPEC, band: 750 })).not.toBe(base);
     // The knob the earlier version of this question did not have at all.
     expect(specHash({ ...TEAM_SPEC, teamBand: 750 })).not.toBe(base);
+  });
+});
+
+describe('phase_death_rate measure', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+  });
+
+  const SPEC: PhaseSpec = {
+    puuid: 'me',
+    role: 'MIDDLE',
+    queueId: 420,
+    gateMinute: MINUTE,
+    band: 500,
+    fromMinute: 14,
+    toMinute: 25,
+    deathsPer10Threshold: 2,
+  };
+
+  it('splits games by deaths per ten minutes and compares win rates', () => {
+    // Four games reaching minute 25 from a lane lead. Eleven minutes of phase, so the 2-per-10
+    // threshold falls between 2 deaths (1.8) and 3 (2.7).
+    seed(db, {
+      id: 'LA2_P1',
+      at: 1000,
+      win: true,
+      laneLead: 2000,
+      restLead: 0,
+      endMinute: 25,
+      deathMinutes: [16, 20],
+    });
+    seed(db, {
+      id: 'LA2_P2',
+      at: 2000,
+      win: true,
+      laneLead: 2000,
+      restLead: 0,
+      endMinute: 25,
+      deathMinutes: [17],
+    });
+    seed(db, {
+      id: 'LA2_P3',
+      at: 3000,
+      win: false,
+      laneLead: 2000,
+      restLead: 0,
+      endMinute: 25,
+      deathMinutes: [15, 18, 21, 23],
+    });
+    seed(db, {
+      id: 'LA2_P4',
+      at: 4000,
+      win: false,
+      laneLead: 2000,
+      restLead: 0,
+      endMinute: 25,
+      deathMinutes: [16, 19, 22],
+    });
+
+    const result = standardMeasure(db)(SPEC, { from: 0, until: Number.POSITIVE_INFINITY });
+    expect(result.n).toBe(4);
+    // Low-death games 2/2, high-death 0/2.
+    expect(result.effect).toBeCloseTo(1, 10);
+  });
+
+  it('counts only deaths inside the phase', () => {
+    // Same four deaths, all of them OUTSIDE 14-25: the game reads as low-death.
+    seed(db, {
+      id: 'LA2_Q1',
+      at: 1000,
+      win: true,
+      laneLead: 2000,
+      restLead: 0,
+      endMinute: 30,
+      deathMinutes: [3, 7, 11, 27],
+    });
+    seed(db, {
+      id: 'LA2_Q2',
+      at: 2000,
+      win: false,
+      laneLead: 2000,
+      restLead: 0,
+      endMinute: 30,
+      deathMinutes: [15, 17, 19, 21],
+    });
+
+    const result = standardMeasure(db)(SPEC, { from: 0, until: Number.POSITIVE_INFINITY });
+    expect(result.n).toBe(2);
+    expect(result.effect).toBeCloseTo(1, 10);
+  });
+
+  it('divides by the minutes the game REACHED, not by the phase on paper', () => {
+    // Two deaths in a game that ends at 19: five minutes of phase, so 4.0 per ten minutes and
+    // HIGH. The same two deaths over a full eleven minutes would be 1.8 and low, which is the
+    // duration artefact the rate exists to remove.
+    seed(db, {
+      id: 'LA2_R1',
+      at: 1000,
+      win: false,
+      laneLead: 2000,
+      restLead: 0,
+      endMinute: 19,
+      deathMinutes: [15, 17],
+    });
+    seed(db, {
+      id: 'LA2_R2',
+      at: 2000,
+      win: true,
+      laneLead: 2000,
+      restLead: 0,
+      endMinute: 25,
+      deathMinutes: [15, 17],
+    });
+
+    const result = standardMeasure(db)(SPEC, { from: 0, until: Number.POSITIVE_INFINITY });
+    expect(result.n).toBe(2);
+    expect(result.effect).toBeCloseTo(1, 10);
+  });
+
+  it('applies the lane gate, so a game he was behind in never enters', () => {
+    seed(db, {
+      id: 'LA2_S1',
+      at: 1000,
+      win: true,
+      laneLead: 2000,
+      restLead: 0,
+      endMinute: 25,
+      deathMinutes: [16],
+    });
+    seed(db, {
+      id: 'LA2_S2',
+      at: 2000,
+      win: false,
+      laneLead: -2000,
+      restLead: 0,
+      endMinute: 25,
+      deathMinutes: [15, 17, 19, 21],
+    });
+
+    const result = standardMeasure(db)(SPEC, { from: 0, until: Number.POSITIVE_INFINITY });
+    // Only the gated game survives, so one group is empty and there is no comparison to make.
+    expect(result.n).toBe(1);
+    expect(Number.isNaN(result.effect)).toBe(true);
+  });
+
+  it('counts the declared hole at ITS OWN gate minute', () => {
+    seed(db, {
+      id: 'LA2_T1',
+      at: 1000,
+      win: true,
+      laneLead: 2000,
+      restLead: 0,
+      endMinute: 25,
+      deathMinutes: [16],
+    });
+    seed(db, {
+      id: 'LA2_T2',
+      at: 2000,
+      win: false,
+      laneLead: 2000,
+      restLead: 0,
+      endMinute: 25,
+      deathMinutes: [15, 17, 19],
+    });
+    expect(countGapGames(db, SPEC, 0, 3000)).toBe(2);
+    expect(countGapGames(db, SPEC, 1500, 3000)).toBe(1);
+  });
+
+  it('freezes its knobs in the hash, so moving the threshold is a different hypothesis', () => {
+    const moved: PhaseSpec = { ...SPEC, deathsPer10Threshold: 2.5 };
+    expect(specHash(moved)).not.toBe(specHash(SPEC));
+    const phase: PhaseSpec = { ...SPEC, toMinute: 30 };
+    expect(specHash(phase)).not.toBe(specHash(SPEC));
+    // And the hash is stable across runs, which is the promise the ledger makes.
+    expect(specHash(SPEC)).toBe(specHash({ ...SPEC }));
   });
 });

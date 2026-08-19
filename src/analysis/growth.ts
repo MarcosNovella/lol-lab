@@ -197,3 +197,38 @@ export function drift(points: GrowthPoint[], pick: (p: GrowthPoint) => number): 
   if (first === undefined || last === undefined) return Number.NaN;
   return (pick(last) - pick(first)) / (last.index - first.index);
 }
+
+/**
+ * Least-squares slope of the rolling series against the game index, per game.
+ *
+ * `drift` above reads two points and throws the rest away, which is fine for a caption under a
+ * drawing and NOT fine for a number that gets frozen into the ledger. Measured on his real
+ * cache 2026-08-18: the CS@10 gap drifts −0.040 per game over 36 games and −0.147 over 39 — the
+ * same series plus three games, a 3.7x swing, because the last point moved. A number a single
+ * game can quadruple cannot carry a dated prediction (G-025).
+ *
+ * The original objection to fitting a line stands and is answered rather than ignored: a
+ * regression invites a p-value, and this project reports effect and n, never p. So this returns
+ * the SLOPE as an effect size in the metric's own units per game, and nothing here computes a
+ * standard error. The rolling means are autocorrelated by construction, which would make any
+ * such error wrong anyway — one more reason there is none.
+ */
+export function trendSlope(points: GrowthPoint[], pick: (p: GrowthPoint) => number): number {
+  if (points.length < 2) return Number.NaN;
+  const xs = points.map((p) => p.index);
+  const ys = points.map(pick);
+  const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
+  const meanY = ys.reduce((a, b) => a + b, 0) / ys.length;
+  let covariance = 0;
+  let variance = 0;
+  for (const [i, x] of xs.entries()) {
+    const y = ys[i];
+    if (y === undefined) return Number.NaN;
+    covariance += (x - meanX) * (y - meanY);
+    variance += (x - meanX) ** 2;
+  }
+  // Every x identical means there is no axis to fit against. Returning 0 would report "no
+  // trend" for "no measurement", which is the confusion G-014 exists to prevent.
+  if (variance === 0) return Number.NaN;
+  return covariance / variance;
+}

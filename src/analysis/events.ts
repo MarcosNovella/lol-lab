@@ -124,12 +124,17 @@ export function nearestFrame(
   return best;
 }
 
-/** His team's gold minus the enemy team's, at the frame nearest `timestamp`. */
+/**
+ * His team's gold minus the enemy team's, at the frame nearest `timestamp`.
+ *
+ * It takes no puuid: `participants` was built for one already and is what decides which side is
+ * "his". The parameter used to be there, unused, which advertised a perspective this function
+ * does not take.
+ */
 export function teamGoldDiffAt(
   match: MatchDto,
   timeline: TimelineDto,
   participants: Participants,
-  puuid: string,
   timestamp: number,
 ): number | null {
   const at = nearestFrame(timeline, timestamp);

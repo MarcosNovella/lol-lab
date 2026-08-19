@@ -28,6 +28,12 @@ function describeSpec(spec: Spec): string {
   if ('rollingGames' in spec) {
     return `deriva: ${spec.metricKey}, ventana ${spec.rollingGames} partidas`;
   }
+  if ('deathsPer10Threshold' in spec) {
+    return (
+      `fase ${spec.fromMinute}-${spec.toMinute}: muertes/10min ≥ ${spec.deathsPer10Threshold}, ` +
+      `con ventaja > ${spec.band} al minuto ${spec.gateMinute}`
+    );
+  }
   return (
     `línea: minuto ${spec.minute}, banda ${spec.band}, outcome ${spec.outcome}, ` +
     `stratum ${spec.stratum}, champion ${spec.champion ?? 'cualquiera'}`

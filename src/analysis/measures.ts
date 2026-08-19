@@ -2,18 +2,20 @@ import type { Db } from '../store/db.ts';
 import { getRawMatch, getRawTimeline, queryParticipants } from '../store/matches.ts';
 import { collectStates, type StateRow } from './conversion.ts';
 import { eventsOfType, participantsOf } from './events.ts';
-import { drift, growthCurve } from './growth.ts';
+import { growthCurve, trendSlope } from './growth.ts';
 import {
   type AnalysisSpec,
   type GrowthSpec,
   LedgerError,
   type Measure,
   type Measurement,
+  type PhaseSpec,
   type Spec,
   type TeamStateSpec,
   type VisionSpec,
   type Window,
 } from './hypotheses.ts';
+import { deathsOf } from './moments.ts';
 
 /**
  * The one measure function the ledger runs.
@@ -224,10 +226,14 @@ function teamStateGivenLane(db: Db, spec: TeamStateSpec, window: Window): Measur
  * nothing on its own: a curve that falls while his opponents' falls faster is improvement. That
  * is the whole argument of ADR-012, applied to a number instead of to a drawing.
  *
- * `n` is games, and the honest reading is that it needs a lot of them: a rolling mean is
- * endpoint-sensitive, so the first reading off this curve (−0.147 CS@10 per game over 39 games)
- * is a description of two endpoints, not a finding. That is exactly why it is going into the
- * ledger rather than into a report.
+ * `n` is games, and the honest reading is that it needs a lot of them.
+ *
+ * It fits a LINE over every point (`trendSlope`) instead of subtracting the two endpoints the
+ * way the growth report does. The endpoint version of this exact number moved from −0.040 to
+ * −0.147 when three games were added to a 36-game series, so freezing it into a dated
+ * prediction would have frozen an artefact of where the series happened to stop (G-025). The
+ * report keeps `drift`, because "how much did the curve move end to end" is a description and
+ * says so.
  */
 function growthDrift(db: Db, spec: GrowthSpec, window: Window): Measurement {
   const curve = growthCurve(db, {
@@ -240,11 +246,69 @@ function growthDrift(db: Db, spec: GrowthSpec, window: Window): Measurement {
     since: window.from,
     ...(Number.isFinite(window.until) ? { until: window.until } : {}),
   });
-  // Two points cannot describe a drift, and one game certainly cannot. `drift` already returns
+  // Two points cannot describe a trend, and one game certainly cannot. `trendSlope` returns
   // NaN below two, which the ledger reads as "not measurable" rather than as zero (G-014).
-  const mine = drift(curve.points, (p) => p.mineRolling);
-  const theirs = drift(curve.points, (p) => p.theirsRolling);
+  const mine = trendSlope(curve.points, (p) => p.mineRolling);
+  const theirs = trendSlope(curve.points, (p) => p.theirsRolling);
   return { n: curve.points.length, effect: mine - theirs };
+}
+
+/**
+ * Deaths per ten minutes of a PHASE, among games that reach it from a lane lead: his win rate
+ * in the low-death games minus his win rate in the high-death ones.
+ *
+ * The exposure denominator is the whole reason this is a different function from "count his
+ * deaths between 14 and 25". Measured 2026-08-19 over 43 mid soloq games, his deaths per ten
+ * minutes run 1.48 while his team is 3k up, 1.47 while even and 2.99 while 3k down — the raw
+ * count of deaths in a phase is largely a count of how long the phase lasted and how badly it
+ * was going, both of which are downstream of the result (G-008). Dividing by the minutes the
+ * game actually reached removes the first; the lane gate limits the second; nothing removes
+ * reverse causality, and the caveat on the row says so.
+ *
+ * Centred at 0 — a difference of two win rates, so the null is "no difference", not 0.5.
+ */
+function phaseDeathRate(db: Db, spec: PhaseSpec, window: Window): Measurement {
+  const { rows } = collectStates(db, {
+    puuid: spec.puuid,
+    role: spec.role,
+    queueId: spec.queueId,
+    since: window.from,
+    ...(Number.isFinite(window.until) ? { until: window.until } : {}),
+    minute: spec.gateMinute,
+  });
+
+  const low: StateRow[] = [];
+  const high: StateRow[] = [];
+  for (const row of rows) {
+    if (row.goldDiff <= spec.band) continue;
+    const match = getRawMatch(db, row.matchId);
+    const timeline = getRawTimeline(db, row.matchId);
+    if (match === null || timeline === null) continue;
+
+    // The phase ends where the GAME ends, read from the last frame's timestamp rather than from
+    // how many frames there are (G-017). A game that surrenders at 19' offers five minutes of a
+    // 14-25 phase, not eleven, and pretending otherwise halves its rate.
+    const lastFrame = timeline.info.frames.at(-1);
+    if (lastFrame === undefined) continue;
+    const to = Math.min(spec.toMinute, Math.floor(lastFrame.timestamp / 60_000));
+    const minutes = to - spec.fromMinute;
+    if (minutes <= 0) continue;
+
+    const deaths = deathsOf(match, timeline, spec.puuid).filter(
+      (death) => death.timestamp >= spec.fromMinute * 60_000 && death.timestamp < to * 60_000,
+    ).length;
+    const per10 = (10 * deaths) / minutes;
+    if (per10 >= spec.deathsPer10Threshold) high.push(row);
+    else low.push(row);
+  }
+
+  const n = low.length + high.length;
+  if (low.length === 0 || high.length === 0) return { n, effect: Number.NaN };
+  return {
+    n,
+    effect:
+      low.filter((r) => r.win).length / low.length - high.filter((r) => r.win).length / high.length,
+  };
 }
 
 export function standardMeasure(db: Db): Measure {
@@ -254,6 +318,7 @@ export function standardMeasure(db: Db): Measure {
     if ('windowSeconds' in spec) return wardBeforeObjective(db, spec, window);
     if ('teamBand' in spec) return teamStateGivenLane(db, spec, window);
     if ('rollingGames' in spec) return growthDrift(db, spec, window);
+    if ('deathsPer10Threshold' in spec) return phaseDeathRate(db, spec, window);
     if (spec.stratum === 'none' && spec.outcome === 'binary_win') {
       return conversionGapBinary(rowsFor(db, spec, window, spec.minute), spec.band);
     }
@@ -299,6 +364,18 @@ export function countGapGames(db: Db, spec: Spec, baselineUntil: number, testFro
       since: baselineUntil,
       until: testFrom,
       minute: spec.minute,
+    }).rows.length;
+  }
+  // A phase spec reads its lane state at `gateMinute`, which is not necessarily the 14 the
+  // others use. Counting the hole at the wrong minute would count a different set of games.
+  if ('deathsPer10Threshold' in spec) {
+    return collectStates(db, {
+      puuid: spec.puuid,
+      role: spec.role,
+      queueId: spec.queueId,
+      since: baselineUntil,
+      until: testFrom,
+      minute: spec.gateMinute,
     }).rows.length;
   }
   return rowsFor(db, spec, { from: baselineUntil, until: testFrom }, spec.minute).length;

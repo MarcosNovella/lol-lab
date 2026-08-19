@@ -5,7 +5,6 @@ import {
   damagers,
   eliteMonsterKills,
   killers,
-  type Participants,
   participantsOf,
   teamGoldDiffAt,
 } from './events.ts';
@@ -104,12 +103,11 @@ export function deathsOf(match: MatchDto, timeline: TimelineDto, puuid: string):
         !myKillers.has(other.victimId),
     );
 
-    const goldBefore = teamGoldDiffAt(match, timeline, participants, puuid, event.timestamp);
+    const goldBefore = teamGoldDiffAt(match, timeline, participants, event.timestamp);
     const goldAfter = teamGoldDiffAt(
       match,
       timeline,
       participants,
-      puuid,
       event.timestamp + COST_WINDOW_MS,
     );
 

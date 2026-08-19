@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { flattenMatch } from '../src/analysis/flatten.ts';
-import { drift, GrowthError, growthCurve } from '../src/analysis/growth.ts';
+import { drift, GrowthError, growthCurve, trendSlope } from '../src/analysis/growth.ts';
 import type { MatchDto } from '../src/riot/types.ts';
 import { type Db, openDb } from '../src/store/db.ts';
 import { saveMatch } from '../src/store/matches.ts';
@@ -152,5 +152,25 @@ describe('the growth curve', () => {
   it('reports drift as NaN below two points rather than inventing a slope', () => {
     seed(db, [{ id: 'LA2_1', at: 100, myCs: 50, theirCs: 60 }]);
     expect(Number.isNaN(drift(curve(db).points, (p) => p.mineRolling))).toBe(true);
+  });
+
+  it('fits the known slope of a straight line, in metric units per game', () => {
+    // 50, 53, 56, 59: exactly +3 CS@10 per game, with the rolling window at 1 so the series is
+    // the raw values and the expected answer is arithmetic rather than a fixture.
+    seed(db, [
+      { id: 'LA2_1', at: 100, myCs: 50, theirCs: 60 },
+      { id: 'LA2_2', at: 200, myCs: 53, theirCs: 60 },
+      { id: 'LA2_3', at: 300, myCs: 56, theirCs: 60 },
+      { id: 'LA2_4', at: 400, myCs: 59, theirCs: 60 },
+    ]);
+    const points = curve(db, 1).points;
+    expect(trendSlope(points, (p) => p.mineRolling)).toBeCloseTo(3, 10);
+    // A flat opponent line has slope zero, not "no measurement".
+    expect(trendSlope(points, (p) => p.theirsRolling)).toBeCloseTo(0, 10);
+  });
+
+  it('reports the fitted slope as NaN below two points, like drift', () => {
+    seed(db, [{ id: 'LA2_1', at: 100, myCs: 50, theirCs: 60 }]);
+    expect(Number.isNaN(trendSlope(curve(db).points, (p) => p.mineRolling))).toBe(true);
   });
 });
