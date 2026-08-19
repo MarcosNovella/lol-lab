@@ -3,6 +3,14 @@
 Goal: grow this repo from "MCP over the Riot API" into `lol-lab`, the engine that says what to
 do differently NEXT game. Plan APPROVED 2026-08-16: `~/.claude/plans/lol-lab-plan.md`.
 
+> **NEXT SESSION: READ `roadmap.md` §A FIRST.** It holds the dated plan agreed on 2026-08-19 —
+> Marcos starts climbing on the MAIN on **Monday 24/08** and wants something that genuinely helps
+> by **Monday 31/08**. One item there is irreversible if missed: **every registered hypothesis
+> carries the smurf's puuid inside its frozen spec, so the ledger STOPS ACCRUING the moment he
+> switches accounts.** The same specs have to be re-registered against the main's puuid on Monday
+> BEFORE his first ranked game, on a freshly synced cache (G-027). Play twenty games first and
+> those twenty fall inside the baseline forever.
+
 Accounts: `LegendofTorcuato#LAS` (smurf = practice, Platinum II) and `LaMarso#LAS` (main = the
 climb, level 301, unranked). LAS => `la2` / `americas`. The main is ladder-serious from game 1.
 Cross-account rule, SETTLED: **knowledge pools across accounts, performance does not.** Matchup
@@ -435,6 +443,9 @@ verify verde, 343 tests.
   `contamination` labels.
 - `data/` is gitignored and single-machine, and a cloud session cannot check a single number. A
   derived, versionable export is the cheap fix; whether it gets committed is his call.
+- **The smurf's five ledger rows freeze the day he moves to the main** (roadmap §A1). Ask him on
+  Monday: retire them with a reason, or leave them live and un-accruing? Leaving them live is
+  honest — nothing about them changed — but the panel then shows five rows that can never move.
 - `git config user.name` is unset ON HIS MACHINE, so his commits are authored by `unknown`.
 - **Nothing from S9/S9b has run on the real cache.** The upkeep chain was exercised against live
   Data Dragon here (a real catalogue and 244 real images), but never against HIS 86 matches.

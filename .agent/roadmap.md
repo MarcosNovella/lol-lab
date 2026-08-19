@@ -1,8 +1,135 @@
 # Roadmap — what to build, and what to ARGUE ABOUT, next session
 
-Read after `state.md`. §1 is time-critical. §2 is the build queue. §3 is the part that needs
-Marcos in the room. §4 is where the last session thinks it may have been wrong — challenge it
-rather than inheriting it.
+Read after `state.md`. **§A is the live plan with hard dates — read it first.** §1 is the old
+time-critical section, now historical. §2 is the build queue. §3 is the part that needs Marcos in
+the room. §4 is where the last session thinks it may have been wrong — challenge it rather than
+inheriting it.
+
+---
+
+## A. THE MAIN'S CLIMB — the plan with real dates (agreed 2026-08-19)
+
+Marcos set two milestones, in his words: **Monday 24/08** he starts climbing on the main and
+wants something "más o menos funcional"; **Monday 31/08** he wants "un software que sirva de
+verdad y me pueda apoyar en él para mejorar y enfocarme en eso". Today is Wednesday 19/08, so
+that is 4 days of build, then a week of real use, then a week of fixing.
+
+Everything below was put to him and agreed. Do not re-litigate the framing; challenge the
+numbers.
+
+### A1. THE ONE THING WITH A HARD DEADLINE — Monday 24, before his first ranked game
+
+**Every registered hypothesis carries the SMURF's puuid inside its frozen spec (G-013), so the
+moment he switches accounts the ledger stops accruing forever.** The five live rows freeze where
+they are — 30 of 300, 26 of 800, 269 of 1200, 19 of 88, 5 of 25 — and never resolve. That is the
+correct rule, not a defect: performance never pools across accounts (ADR-011), different MMR and
+different intent. But it means there is a dated, irreversible decision.
+
+**On Monday 24, in this order: SYNC → REGISTER the same specs against the main's puuid → then he
+plays.** G-027 is exactly why the order matters: `team_state_dominates` was once registered
+against a stale cache and its declared hole recorded 3 states when the truth was 7. And if he
+plays twenty games first and registers after, those twenty land INSIDE the baseline and are not
+out-of-sample ever again.
+
+It is also the cleanest boundary this project will ever get: new account, new elo, new regime,
+day one. Prepare `scripts/register-hypotheses.ts` for the main BEFORE Monday, reviewed, so
+Monday is one command and not a design session.
+
+Open question for him, worth one minute on Monday: the smurf's five rows stay frozen at their
+current n. Retire them with a reason, or leave them live and un-accruing? Leaving them live is
+honest (nothing about them changed) but the panel will show five rows that can never move.
+
+### A2. THE REAL RISK — the panel goes almost mute on a fresh account
+
+The whole reading is built on the smurf's 86 games. With the main at zero:
+
+- `benchmark` needs `MIN_GAMES` = 5, so nothing at all on the first night.
+- Coverage says "no puedo hablar" about nearly every matchup: his own record on the main is 0.
+- The growth curve smooths over 10 games, so it is meaningless until ~15.
+- The tag split starts empty; the ledger says `insufficient_n` everywhere, correctly.
+
+He opens the panel on Tuesday after eight games and five sections say "no sé". The natural
+conclusion is "this does not work", and it would be a wrong conclusion about software that is
+being honest. **This is a design gap, not a bug, and it is the main build item for 20-23/08.**
+
+**What to build: a PER-GAME and PER-SESSION reading layer.** An aggregate needs n; a description
+does not. "En esta partida perdiste 14 de CS al minuto 10 contra tu Yone, y a los 14 estabas 800
+de oro abajo" is n=1 and is completely valid. What cannot be said at n=1 is "sos malo farmeando".
+The existing pieces (`moments`, `stateCurve`, `phaseSplit`, `itemRace`) are already per-game and
+already computed — the gap is that the panel spends them on aggregates.
+
+### A3. What the smurf's history CAN give the main from game one
+
+**Matchup reps pool across accounts; the record does not** (ADR-011, §5b, machine-checked by
+`MATCHUP_PERSPECTIVE`). So `prep` against Yone already knows what 29 smurf games taught him —
+what the opponent does and when, when the matchup turns. That works on Monday morning with zero
+main games.
+
+**It has to be in his face on Monday, not buried under "En champ select".** It is the only thing
+that makes two weeks of smurf data pay off on day one of the climb.
+
+### A4. The schedule
+
+**Now → Sunday 23 — four days of build**
+1. **Run everything on the REAL cache.** Nothing from S9/S9b/S9c/S9d/S9e/S9f has touched his 86
+   games — briefing, upkeep chain, reading, phases, growth, tag split, all measured against
+   fixtures and a seeded database. Biggest risk in the whole plan and not a feature.
+2. **The per-game / per-session reading layer** (A2). Carries the main's entire first week.
+3. **Make a zero-game account behave well**: what the panel says, offers and promises when an
+   account has no history. G-019 was born in exactly that state.
+4. **The main's re-registration script**, written and reviewed, ready to run Monday (A1).
+
+**Monday 24 — he starts.** Sync, register, play. And that week we deliberately DO NOT code much:
+he uses it and writes down what was missing. One week of real use is worth more than four days
+of guessed features.
+
+**Monday 24 → Sunday 30** — fix what real use exposed, plus the session-over-session reading
+(week 1 vs week 2), plus the peer corpus if it fits (§A6).
+
+**Monday 31 — the bar.**
+
+### A5. What 31/08 can and cannot honestly deliver
+
+With ~86 smurf games and ~20-30 on the main:
+
+- **YES** per-game and per-session: what happened that night and where it went, with the minute.
+- **YES** against the mids he actually faced on the main, with the n printed beside it.
+- **YES** what he knows about each matchup, pooling smurf and main.
+- **YES** what he SAID (tags) against what the engine MEASURED.
+- **NO** ledger verdicts. They will read `insufficient_n` and that is the correct answer.
+- **NO** smurf against main. Different elo; it cannot be done and never will be.
+
+**The bar for 31/08, in one sentence, agreed with him:** *"después de cada sesión sé exactamente
+qué pasó y dónde se me fue, y después de dos semanas veo si eso se repite o fue esa noche."*
+NOT "the software tells me how to improve" — that arrives when the n arrives, and on 31/08 the
+most that can be true is that the clock has been running clean since the main's first game.
+
+### A6. The one move that buys n with code instead of with calendar
+
+Every one of his matches holds NINE other players, and match-v5 serves their histories. At
+100 requests per 2 minutes and 2 requests per game with timeline, that is **~1,500 games an
+hour** — a few hours a day for three days is tens of thousands of Platinum games. `ward_before
+_objective_60s` does not need 130 of HIS games at that point, it needs 130 of anyone's.
+
+**The constraint that makes it legal here:** a hypothesis registered about HIM cannot be resolved
+with other people's games — the `puuid` is inside the frozen spec (G-013). These would be NEW
+rows, of a different class. And that class already exists and is settled: **knowledge pools,
+performance does not** (ADR-011). "In Platinum, warding before an objective raises the rate of
+taking it" is knowledge. "You ward less than your opponents" is performance. The first can be
+bought with requests; the second only with his own games.
+
+What it unlocks that nothing else can: telling apart "this is my leak" from "this is what
+everyone in Platinum does". Today there is no way to know which.
+
+Not a week-1 item. Week 2, or whenever the per-game layer is done.
+
+### A7. What NOT to build, agreed
+
+- **Never lower an `nNeeded`** to have verdicts by Friday. It is the one change that destroys the
+  whole point of the ledger.
+- **No overall "score".** It hides which part moved, which is the only thing worth knowing.
+- **No match prediction or AI coaching.** At n=86 it is a generator of pretty sentences.
+- **No cloud, no accounts, no multi-user.** Not the product.
 
 ---
 
