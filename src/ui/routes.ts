@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { type Accion, type Briefing, runway } from '../analysis/briefing.ts';
 import {
   abandonedByCutoff,
   closeSession,
@@ -23,6 +24,7 @@ import { confidenceOf, prepMatchup } from '../analysis/prep.ts';
 import { loadPriors, priorFor, priorsKeyedLike } from '../analysis/priors.ts';
 import { describeRank, latestSnapshot, TRACKED_QUEUES } from '../analysis/rank.ts';
 import { type DeathDot, deathMapSvg, goldCurveSvg, isOwnHalf } from '../analysis/render.ts';
+import { assembleBriefing, PregameError } from '../pregame.ts';
 import { keyState } from '../riot/key.ts';
 import type { Db } from '../store/db.ts';
 import { ASSETS_ROOT } from '../store/db.ts';
@@ -45,14 +47,14 @@ import {
  * analysis layer — a third front-end, not a third copy of the engine (ADR-006).
  */
 
-/** A thing he could do right now, and why. The answer to "decime qué tengo que ejecutar". */
-export type Accion = {
-  /** Stable id so the page can wire a button to it without matching on prose. */
-  id: 'taguear' | 'sync' | 'key' | 'resolver_cuenta';
-  urgencia: 'ahora' | 'cuando_puedas';
-  que: string;
-  porque: string;
-};
+/**
+ * A thing he could do right now, and why. The answer to "decime qué tengo que ejecutar".
+ *
+ * The type and the rules that build it live in `analysis/briefing.ts` now: the pre-game moment
+ * needs the same list under a different framing, and two copies of "what is broken" drift the
+ * day one of them learns about a new failure.
+ */
+export type { Accion };
 
 export type EstadoCuenta = {
   label: string;
@@ -123,58 +125,23 @@ export function estado(db: Db, now: number = Date.now()): Estado {
   }
 
   const pendientesTotal = cuentas.reduce((n, c) => n + c.pendientes, 0);
-  const acciones: Accion[] = [];
 
-  if (cuentas.length === 0) {
-    acciones.push({
-      id: 'resolver_cuenta',
-      urgencia: 'ahora',
-      que: 'Registrar tu cuenta',
-      porque: 'La caché está vacía: no hay ninguna cuenta resuelta todavía.',
-    });
-  }
-
-  // Tagging comes first in the list for the same reason it comes first in the ritual: it is the
-  // only input here that cannot be recomputed tomorrow (ADR-015).
-  if (pendientesTotal > 0) {
-    acciones.push({
-      id: 'taguear',
-      urgencia: 'ahora',
-      que: `Taguear ${pendientesTotal} partida${pendientesTotal === 1 ? '' : 's'}`,
-      porque:
-        'Es lo único que separa "jugué mal" de "me tocó mal", y una partida sin taguear no se ' +
-        'puede taguear más adelante.',
-    });
-  }
-
-  if (!key.present || key.likelyExpired) {
-    acciones.push({
-      id: 'key',
-      urgencia: key.present ? 'cuando_puedas' : 'ahora',
-      que: key.present ? 'Regenerar la key de Riot' : 'Pegar una key de Riot',
-      porque: key.problem ?? 'Sin key no se puede sincronizar.',
-    });
-  }
-
-  // "Never synced" and "synced a long time ago" are different facts and must not collapse into
-  // each other. Mapping a missing sync to 0 makes `now - 0` an age of five hundred thousand
-  // hours, which is a plausible-looking number standing in for an absent one — the substitution
-  // G-005 exists to stop.
-  const nuncaSincronizada = cuentas.some((c) => c.ultimoSync === null);
-  const sincronizadas = cuentas.flatMap((c) => (c.ultimoSync === null ? [] : [c.ultimoSync.at]));
-  const masVieja = sincronizadas.length === 0 ? null : Math.min(...sincronizadas);
-  const horasSinSync = masVieja === null ? null : (now - masVieja) / 3_600_000;
-
-  if (cuentas.length > 0 && (nuncaSincronizada || (horasSinSync !== null && horasSinSync >= 12))) {
-    acciones.push({
-      id: 'sync',
-      urgencia: 'cuando_puedas',
-      que: 'Sincronizar',
-      porque: nuncaSincronizada
-        ? 'Hay una cuenta que nunca se sincronizó.'
-        : `Hace ${Math.floor(horasSinSync ?? 0)} h que no se baja nada.`,
-    });
-  }
+  // ONE implementation of "what is broken", shared with the pre-game briefing (ADR-022). The
+  // panel reads it as "qué hacer ahora" and `lol antes` reads it as "qué te va a romper el
+  // ritual de esta noche"; they are two framings of one list, and keeping two copies is how the
+  // day-after list learns about a failure the night-before list never hears of.
+  const acciones = runway({
+    cuentas: cuentas.map((c) => ({
+      pendientes: c.pendientes,
+      ultimoSyncAt: c.ultimoSync?.at ?? null,
+    })),
+    key: {
+      presente: key.present,
+      probablementeVencida: key.likelyExpired,
+      problema: key.problem,
+    },
+    now,
+  });
 
   return {
     cuentas,
@@ -734,4 +701,26 @@ export function ledger(db: Db): {
       ultima: last === undefined ? null : { veredicto: last.verdict, n: last.n },
     };
   });
+}
+
+// ------------------------------------------------------------------------ antes de jugar
+
+/**
+ * El briefing previo a la sesión, y la anotación de lo que le mostró.
+ *
+ * Ojo con lo que hace de más respecto a las demás rutas: ESCRIBE. Una exposición se anota cuando
+ * el foco se muestra, porque la contaminación empieza cuando la lee, no cuando la usa. Que el
+ * panel se abra después de jugar y también anote es el error en la dirección correcta: sobrestima
+ * la contaminación, y sobrestimarla nunca deja pasar un veredicto sucio como limpio.
+ *
+ * `SESSION_GAP_MS` hace que el polling de la página no infle el conteo: una fila de la tabla es
+ * una sentada, no un refresh.
+ */
+export function antes(db: Db, cuenta: string, now: number = Date.now()): Briefing {
+  try {
+    return assembleBriefing(db, cuenta, now);
+  } catch (error) {
+    if (error instanceof PregameError) throw new RouteError(404, error.message);
+    throw error;
+  }
 }

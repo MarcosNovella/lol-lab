@@ -104,6 +104,10 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; color: var(--dim); font-weight: 600; padding: 4px 8px 4px 0; }
 td { padding: 3px 8px 3px 0; border-top: 1px solid var(--line); }
 .alcance { color: var(--dim); font-size: 12px; margin-top: 8px; }
+.foco { border-left: 3px solid var(--warn); }
+.foco .claim { margin: 6px 0; }
+.guardada { color: var(--dim); font-size: 12px; margin-top: 4px; }
+.anotado { color: var(--warn); font-size: 12px; margin-top: 8px; }
 input { font: inherit; color: var(--ink); background: #0b0d11; border: 1px solid var(--line);
         border-radius: 7px; padding: 6px 10px; width: 150px; }
 .svgbox { overflow-x: auto; }
@@ -581,6 +585,41 @@ async function renderCobertura() {
   box.append(card);
 }
 
+async function renderAntes() {
+  const box = document.getElementById('antes');
+  box.replaceChildren();
+  const b = await api('/api/antes');
+
+  if (b.focus === null) {
+    // El silencio se explica siempre. Un panel que no dice nada y no dice por qué se lee como
+    // que no encontró nada, que es lo contrario de lo que pasó.
+    box.append(el('div', 'card dim', b.noFocusReason || 'Nada registrado que mostrar.'));
+  } else {
+    const card = el('div', 'card foco');
+    card.append(el('div', 'que', b.focus.id));
+    card.append(el('div', 'claim', b.focus.claim));
+    card.append(el('div', 'porque', 'cautela: ' + b.focus.caveat));
+    card.append(el('div', 'porque',
+      'le faltan ' + b.focus.shortfall + ' mediciones · ' + b.focus.why));
+    card.append(el('div', 'anotado', b.focus.alreadyExposed
+      ? 'Ya la habías visto: esta fila arrastra que te la dije antes de jugar.'
+      : 'ANOTADO: desde ahora esta fila arrastra que te la dije antes de jugar.'));
+    box.append(card);
+  }
+
+  if (b.withheld.length > 0) {
+    // En su propia tarjeta y no como texto suelto: es una decisión del motor, no una nota al pie.
+    const guardadas = el('div', 'card');
+    guardadas.append(el('div', 'porque', 'Guardadas, a propósito:'));
+    for (const w of b.withheld) {
+      guardadas.append(el('div', 'guardada', w.reason === 'sin_evaluar'
+        ? w.id + ' — nunca se evaluó, y la exposición no se deshace'
+        : w.id + ' — le faltan ' + w.shortfall + ', todavía puede dar un veredicto limpio'));
+    }
+    box.append(guardadas);
+  }
+}
+
 async function renderLedger() {
   const box = document.getElementById('ledger');
   box.replaceChildren();
@@ -663,6 +702,7 @@ const fallar = (err) => {
 refrescar();
 renderSync();
 renderPrep();
+renderAntes().catch(fallar);
 renderPendientes().catch(fallar);
 renderMomentos().catch(fallar);
 renderGraficos().catch(fallar);
@@ -704,6 +744,9 @@ El token cambia en cada arranque, así que un favorito viejo no sirve.</p>
   <h2>Qué hacer ahora</h2>
   <div id="acciones"></div>
 
+  <h2>Antes de jugar</h2>
+  <div id="antes"></div>
+
   <h2>Sincronizar</h2>
   <div id="sync"></div>
 
@@ -714,7 +757,7 @@ El token cambia en cada arranque, así que un favorito viejo no sirve.</p>
   <h2>Lo que salió caro</h2>
   <div id="momentos"></div>
 
-  <h2>Antes de entrar</h2>
+  <h2>En champ select</h2>
   <div id="prep"></div>
 
   <h2>Curva y mapa</h2>

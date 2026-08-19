@@ -210,12 +210,16 @@ page for the gold curve and death map) only if Marcos asks.
    already registered at n=5 of 25. The honest caveat, recorded: he has not played her in 8
    games, so it may never reach n, and "his behaviour already answered" stays the likely
    outcome. Do not re-litigate this without new games.
-2. **Day 1 of the main.** PARTLY ANSWERED — the ritual is decided (`lol cerrar`, ADR-016) and
-   `lol cobertura` now states exactly what the engine cannot say yet. What is NOT settled is
-   the before-the-game half: he chose only the post-session moment, so nothing speaks to him
-   before his first ranked game. Worth re-raising once the main actually starts, with the
-   evidence of whether he misses it. Note G-019 was born from precisely the main's day-1 state:
-   no record and no prior.
+2. ~~**Day 1 of the main.**~~ **THE BEFORE-THE-GAME HALF IS BUILT, 2026-08-19 (ADR-022).**
+   `lol antes` / `lol_antes` / the panel's "Antes de jugar": the runway (what will break
+   tonight's ritual), AT MOST ONE hypothesis from the ledger, the clock, and what it still
+   cannot speak about. The interesting part is what it refuses — a row whose verdict is within
+   reach is withheld, because showing it burns the only clean window it will ever have, and
+   whatever IS shown is recorded in `briefing_exposures` so a later verdict carries its
+   asterisk. What remains for HIM, and only once the main is really running: whether the one
+   focus is the right shape, or whether the pre-game moment wants something the ledger cannot
+   give (a matchup, a mood, a "no juegues hoy"). Do not guess it — ask after he has used it.
+   Note G-019 was born from precisely the main's day-1 state: no record and no prior.
 3. ~~**The op.gg cross-check from S1 step 4 was never confirmed to have run.**~~ **DONE
    2026-08-16, and it PASSES.** All 8 champion totals reconcile exactly against
    `opgg-champion-pool-2026-08-14.csv`, and all 20 games in `opgg-matches-2026-08-14.csv` match

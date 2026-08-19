@@ -5,6 +5,7 @@ import {
   type Spec,
 } from '../analysis/hypotheses.ts';
 import { standardMeasure } from '../analysis/measures.ts';
+import { exposureOf, gamesSince } from '../store/briefings.ts';
 import { openDb } from '../store/db.ts';
 import { CliError, out } from './shared.ts';
 
@@ -66,6 +67,18 @@ export function run(argv: string[]): void {
           `${h.gapGames} partida(s) en el hueco declarado`,
       );
       out(`  cautela: ${h.caveat}`);
+
+      // El asterisco, donde se lee el veredicto. Una fila que le mostramos antes de jugar dejó
+      // de tener una ventana ciega, y eso no puede vivir solo en la tabla de exposiciones: si
+      // hay que creerle o no a un veredicto, se decide acá (ADR-022).
+      const exposicion = exposureOf(db, h.id);
+      if (exposicion !== null) {
+        const jugadas = gamesSince(db, h.spec.puuid, exposicion.first);
+        out(
+          `  EXPUESTA desde ${new Date(exposicion.first).toISOString().slice(0, 10)} · ` +
+            `${exposicion.count} sentada(s) · ${jugadas} partida(s) jugadas sabiéndola`,
+        );
+      }
 
       if (measure !== null) {
         // The spec is handed back explicitly so a drifted call site fails loudly (G-013) rather

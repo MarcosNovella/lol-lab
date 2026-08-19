@@ -11,6 +11,7 @@ import { syncMatches } from '../sync.ts';
 import { renderShell } from './page.ts';
 import {
   abrirSesion,
+  antes,
   cerrarSesion,
   cobertura,
   dejarAtras,
@@ -294,6 +295,12 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
       const sesion = numOrNull(body, 'sesion');
       if (sesion === null) throw new RouteError(400, "falta 'sesion'");
       json(response, 200, cerrarSesion(db, { sesion, tilt: numOrNull(body, 'tilt') }));
+      return;
+    }
+    // Una GET que ESCRIBE, que es la excepción de todo el servidor: mostrar el foco es lo que
+    // contamina la hipótesis, así que la exposición se anota al mostrarla (ADR-022).
+    if (url.pathname === '/api/antes') {
+      json(response, 200, antes(db, cuenta));
       return;
     }
     if (url.pathname === '/api/momentos') {

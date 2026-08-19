@@ -52,7 +52,20 @@ Para dejar de rotarla, pedí una **Personal API Key** en el mismo portal
 
 ## El ritual
 
-Cuando terminás de jugar, **doble click a `lol-ui.bat`**. Desde la terminal es `pnpm lol ui`.
+Son dos momentos, y el de antes es el más barato.
+
+**Cuando te sentás a jugar: `pnpm lol antes`.** Te dice qué arreglar antes de entrar (taguear lo
+de anoche, la key vencida — cosas que si no hacés ahora te rompen el cierre a las tres de la
+mañana), UNA cosa para tener en la cabeza y en qué anda el reloj del rango.
+
+Esa "una cosa" sale del ledger de hipótesis y nunca de una corazonada. Y el motor se guarda las
+que todavía pueden dar un veredicto limpio: contarte una predicción antes de jugar la ensucia
+—después no se separa "el patrón era real" de "me lo dijeron y reaccioné"— así que solo te muestra
+las que no van a resolverse en meses igual, te dice cuáles se guardó, y anota lo que te mostró
+para que el veredicto que salga después traiga el asterisco. Sin trampa: no hay forma de espiarlo
+sin que quede anotado.
+
+**Cuando terminás de jugar, doble click a `lol-ui.bat`.** Desde la terminal es `pnpm lol ui`.
 
 El acceso directo del escritorio ya está hecho y apunta acá; si alguna vez hay que rehacerlo,
 el icono es `assets/lol-lab.ico` y el destino es este `.bat` con el repo como carpeta de inicio.
@@ -76,7 +89,7 @@ acordarse, no observar — el software anota cuánto tardaste, así que no se me
 
 Si preferís la terminal, `pnpm lol cerrar` hace el mismo ritual con una tecla por partida
 (`y` la produje yo · `i` salía igual · `p` estuvo pareja). `pnpm lol` solo lista todo lo demás:
-`report`, `prep`, `cobertura`, `growth`, `page`, `hip`, `rank`, `items`.
+`antes`, `report`, `prep`, `cobertura`, `growth`, `page`, `hip`, `rank`, `items`.
 
 `pnpm lol items` es de una sola vez por parche: baja la tabla de ítems de Data Dragon (sin key,
 sin rate limit, un catálogo por parche que hayas jugado) y con eso el reporte y el panel pueden
@@ -107,6 +120,7 @@ un solo request.
 | `lol_tags` | Cómo se repartieron los resultados según a quién se los atribuiste. |
 | `lol_tag` | Taguear una partida suelta, para la noche que no corriste `lol cerrar`. |
 | `lol_rank` | Dónde está cada cuenta y qué se movió desde que arrancó el reloj. |
+| `lol_antes` | El briefing de antes de jugar: qué arreglar, un solo foco y el reloj. Anota lo que te muestra. |
 
 Flujo típico la primera vez:
 

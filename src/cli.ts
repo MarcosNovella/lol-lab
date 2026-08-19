@@ -1,3 +1,4 @@
+import * as antes from './cli/antes.ts';
 import * as assets from './cli/assets.ts';
 import * as cerrar from './cli/cerrar.ts';
 import * as cobertura from './cli/cobertura.ts';
@@ -36,6 +37,7 @@ type Command = {
 
 const COMMANDS: Record<string, Command> = {
   ui: { summary: ui.SUMMARY, usage: ui.USAGE, run: ui.run },
+  antes: { summary: antes.SUMMARY, usage: antes.USAGE, run: antes.run },
   cerrar: { summary: cerrar.SUMMARY, usage: cerrar.USAGE, run: cerrar.run },
   report: { summary: report.SUMMARY, usage: report.USAGE, run: report.run },
   prep: { summary: prep.SUMMARY, usage: prep.USAGE, run: prep.run },
@@ -59,7 +61,8 @@ function help(): void {
   out('Uso:');
   for (const command of Object.values(COMMANDS)) out(`  ${command.usage}`);
   out();
-  out('El ritual es `lol cerrar`. Todo lo demás es para cuando querés mirar algo puntual.');
+  out('El ritual son dos: `lol antes` cuando te sentás y `lol cerrar` cuando terminás.');
+  out('Todo lo demás es para cuando querés mirar algo puntual.');
 }
 
 const [, , name, ...rest] = process.argv;

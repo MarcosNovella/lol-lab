@@ -17,9 +17,10 @@ numerator of a cross-account win rate.
 ## What exists
 
 `src/analysis/*` is the engine and is pure and I/O-free; everything else is a front-end over it
-(ADR-006). Three of them, no duplicated arithmetic: `src/server.ts` (MCP, 14 tools), `src/cli.ts`
-(`lol cerrar · report · prep · cobertura · growth · page · hip · rank · ui`) and `src/ui/*` (the
-local panel, ADR-018).
+(ADR-006). Three of them, no duplicated arithmetic: `src/server.ts` (MCP, 15 tools), `src/cli.ts`
+(`lol antes · cerrar · report · prep · cobertura · growth · page · hip · rank · items · assets ·
+ui`) and `src/ui/*` (the local panel, ADR-018). Composition that all three need and that cannot
+be pure lives beside them: `src/sync.ts` and now `src/pregame.ts`.
 
 Analysis modules: `state`/`conversion` (lane state at a minute, `restOfTeamGoldDiff` with his own
 lane pair removed) · `events`/`moments` (deaths, fights, expensive moments) · `curve` (state
@@ -28,7 +29,8 @@ curve, `biggestSwing`, `phaseSplit`) · `macro` (objectives, vision timing, temp
 `growth` (per-account curve vs the lane opponent, `drift` and `trendSlope`) · `hypotheses` +
 `measures` (the ledger, one measure dispatching on a frozen spec) · `capture` (play sessions and
 reported tags) · `coverage` · `rank` · `render` (SVG + its CSS) · `names` · `priors` · `metrics`
-(every metric declares `contamination`).
+(every metric declares `contamination`) · `items` (build timings against the lane opponent) ·
+`briefing` (what may be said BEFORE a game, ADR-022).
 
 Cache: SQLite at `data/riot.db`, gitignored and single-machine. As of the sync of 2026-08-19
 00:05 UTC: 86 matches, 82 timelines (the 4 missing are remakes), 2 accounts, 7 hypothesis rows
@@ -245,6 +247,47 @@ Pedido suyo: que se entienda de un vistazo. ADR-021.
 
 verify verde, 289 tests. Visto en el navegador, no supuesto.
 
+## S9 2026-08-19, CLOUD — the other half of the ritual
+
+Code-only session (D1: nube = código, local = datos), so nothing below was run against the real
+cache. `pnpm verify` green here on Node 22.22, 309 tests.
+
+**Roadmap §3.2 is closed: there is a pre-game moment now.** `lol antes`, `lol_antes` and a panel
+section, over `src/analysis/briefing.ts` (pure) and `src/pregame.ts` (the composition + the one
+write). ADR-022.
+
+- **The design decision is a refusal.** Showing him a live hypothesis before a game contaminates
+  it on purpose — §4.8 already recorded that — so the briefing shows AT MOST ONE, and only a row
+  whose verdict is out of reach. On today's ledger that means `ward_before_objective_60s` (931
+  short) is spendable and `diana_needs_a_lead` (20 short) is WITHHELD, with the panel saying so:
+  the silence is a decision, not a hole.
+- **The horizon knob was swept and the first claim about it was FALSE.** The comment said the
+  partition is stable from 100 to 400; the test proved it changes at 270, where
+  `lead_conversion_gap` flips to withheld. 200 sits inside the real insensitive range (100-269).
+  Both the comment and the test now say the true bound, and the boundary is pinned.
+- **`briefing_exposures`** (append-only, deduped to one row per sitting) turns the contamination
+  into a number: `lol hip` and `lol_hypotheses` now print `EXPUESTA desde <fecha> · N sentada(s) ·
+  M partida(s) jugadas sabiéndola` on any row he has been shown. There is deliberately no flag to
+  preview without recording.
+- **G-029 born from running it.** A hypothesis that had never been evaluated arrived as `n = 0`,
+  so its shortfall was the whole of `nNeeded` and it looked FURTHER from a verdict than any
+  evaluated row — making an unevaluated ledger maximally talkative, exactly backwards, and the
+  exposure it spends cannot be undone. `n` is `number | null` now; a null is withheld with its own
+  reason and the briefing says to run `lol hip evaluar` first. The tests were green before this
+  was found; `lol antes` against a seeded cache is what found it.
+- **One implementation of "what is broken", not two.** The panel's `acciones` and the briefing's
+  runway are the same list under two framings, so `estado()` now delegates to the pure `runway()`.
+  Behaviour is unchanged and the 43 UI tests passed untouched.
+- The panel's old "Antes de entrar" (the matchup lookup) is now **"En champ select"**, so the two
+  pre-game moments read as different things: the session briefing and the per-game matchup.
+- Seen in a browser, not assumed: served, screenshotted and read.
+
+### What is NOT built, deliberately
+- The briefing never invents advice. Everything it can say comes from the ledger, so if the
+  ledger is empty it says exactly that.
+- `lol antes` has no `--sin-anotar`. A register that can be bypassed is a register that lies at
+  the exact moment it has to be believed.
+
 ## Open questions
 - **Diana**: closed by D3 as "the ledger decides", with the caveat that at n=5 needing 25, and 8
   games since he last played her, it may never reach n.
@@ -254,6 +297,9 @@ verify verde, 289 tests. Visto en el navegador, no supuesto.
 - `data/` is gitignored and single-machine, and a cloud session cannot check a single number. A
   derived, versionable export is the cheap fix; whether it gets committed is his call.
 - `git config user.name` is unset ON HIS MACHINE, so his commits are authored by `unknown`.
+- **The briefing has never run on the real cache.** Everything in S9 was measured against fixtures
+  and a seeded database; the first real run is his, and the first thing to check is whether the
+  row it picks is the one a human would have picked.
 - `package.json` declares `engines: >=24`; the cloud container runs Node 22.22 and the whole
   suite passes there too.
 - Biome is at ZERO warnings since S8 (`teamGoldDiffAt` no longer advertises a `puuid` it never

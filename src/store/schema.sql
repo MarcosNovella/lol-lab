@@ -245,3 +245,24 @@ CREATE TABLE IF NOT EXISTS items (
   tags       TEXT NOT NULL,
   PRIMARY KEY (item_id, version)
 );
+
+-- Cada vez que el briefing previo a jugar le MOSTRÓ una hipótesis viva.
+--
+-- Existe para que la contaminación sea medible en vez de una nota al pie. Una fila del ledger se
+-- evalúa contra las partidas posteriores a su registro, y §4.8 ya dejó anotado que contársela
+-- mezcla "el patrón era real" con "se lo dijeron y reaccionó". Mostrarla antes de jugar es
+-- exactamente eso, a propósito y por la razón de `analysis/briefing.ts`; lo que no se puede es
+-- que después no se sepa desde cuándo.
+--
+-- Append-only como el ledger, y por lo mismo: la primera exposición es irreversible y borrarla
+-- sería borrar la única prueba de que el veredicto que viene tiene un asterisco.
+CREATE TABLE IF NOT EXISTS briefing_exposures (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  hypothesis_id TEXT    NOT NULL,
+  puuid         TEXT    NOT NULL,
+  shown_at      INTEGER NOT NULL,
+  FOREIGN KEY (hypothesis_id) REFERENCES hypotheses (id) ON DELETE CASCADE,
+  FOREIGN KEY (puuid)         REFERENCES accounts   (puuid) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS briefing_exposures_hid
+  ON briefing_exposures (hypothesis_id, shown_at);
