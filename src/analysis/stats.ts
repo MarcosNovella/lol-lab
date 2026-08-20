@@ -70,6 +70,23 @@ export function quantile(values: number[], q: number): number {
   return loVal + (hiVal - loVal) * (pos - lo);
 }
 
+/**
+ * True when a sample carries no magnitude at all: every value is 0 or 1.
+ *
+ * The point is that a DECLARATION about Riot's data cannot be checked by the type system, so
+ * `benchmark()` checks it against the sample it actually has. A metric declared `magnitude`
+ * whose observations are all 0/1 is a flag whatever the catalogue says, and a percentile over
+ * it is the number G-009 was written about.
+ *
+ * Deliberately narrow. It answers "is there any spacing here to take a mean of", not "what
+ * kind of variable is this" — a heuristic that guessed at ordinals would fire on turret plates
+ * and solo kills, which ARE counts, and a check nobody trusts gets switched off.
+ */
+export function looksBinary(values: number[]): boolean {
+  if (values.length === 0) return false;
+  return values.every((v) => v === 0 || v === 1);
+}
+
 export function round(value: number, decimals = 2): number {
   if (!Number.isFinite(value)) return Number.NaN;
   const f = 10 ** decimals;

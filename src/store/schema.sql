@@ -152,7 +152,8 @@ CREATE TABLE IF NOT EXISTS hypothesis_evaluations (
   elo           TEXT,
   n             INTEGER NOT NULL,
   effect        REAL,               -- NULL = not measurable. See baseline_effect above (G-014).
-  verdict       TEXT NOT NULL,      -- 'insufficient_n' | 'consistent' | 'inconsistent' | 'no_effect'
+  -- 'insufficient_n' | 'consistent' | 'inconsistent' | 'no_effect' | 'unmeasurable'
+  verdict       TEXT NOT NULL,
   FOREIGN KEY (hypothesis_id) REFERENCES hypotheses (id) ON DELETE CASCADE
 );
 

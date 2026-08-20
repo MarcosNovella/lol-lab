@@ -174,7 +174,42 @@ export function specHash(spec: Spec): string {
 
 export type Direction = 'lower' | 'higher' | 'none';
 
-export type Verdict = 'insufficient_n' | 'consistent' | 'inconsistent' | 'no_effect';
+/**
+ * `unmeasurable` is separate from `no_effect` on purpose, and the distinction is the whole of
+ * G-005: "there is no difference" is a FINDING and "the statistic was undefined" is the absence
+ * of one, and collapsing them publishes the second as the first. The case is not hypothetical —
+ * `conversionGapBinary` returns a NaN effect whenever one of its two buckets is empty, and `n`
+ * is the size of the other bucket, so a large one-sided sample used to come back as `no_effect`.
+ */
+export type Verdict =
+  | 'insufficient_n'
+  | 'consistent'
+  | 'inconsistent'
+  | 'no_effect'
+  | 'unmeasurable';
+
+/**
+ * The verdict as a sentence, because the four values are read by one person in Spanish and the
+ * newest one is the one nobody can guess from its name.
+ *
+ * Kept beside the type rather than in each front-end so the three of them cannot drift into
+ * three different readings of the same word — which matters most for `unmeasurable`, whose
+ * whole reason to exist is that it is NOT `no_effect`.
+ */
+export function verdictLabel(verdict: Verdict): string {
+  switch (verdict) {
+    case 'insufficient_n':
+      return 'todavía sin muestra suficiente';
+    case 'consistent':
+      return 'va en la dirección predicha';
+    case 'inconsistent':
+      return 'va en contra de la dirección predicha';
+    case 'no_effect':
+      return 'efecto exactamente cero';
+    case 'unmeasurable':
+      return 'NO MEDIBLE — la medición no se pudo tomar (un lado de la comparación quedó vacío)';
+  }
+}
 
 export type Hypothesis = {
   id: string;
@@ -314,7 +349,23 @@ export function listHypotheses(db: Db, includeRetired = false): Hypothesis[] {
   return (db.prepare(sql).all() as Record<string, unknown>[]).map(rowToHypothesis);
 }
 
-export type Measurement = { n: number; effect: number };
+export type Measurement = {
+  n: number;
+  effect: number;
+  /**
+   * Games inside the window that the measure could not read AT ALL, and therefore did not
+   * count in `n`. Optional because not every measure has such a category: a vision measure
+   * walks games and either reads one or does not exist for it.
+   *
+   * It exists because `collectStates` has always counted these — `{ noTimeline,
+   * endedBeforeMinute }`, under a comment promising they are never dropped silently — and no
+   * front-end ever read the field. A sync with `withTimeline: false` leaves games in the cache
+   * with no minute data at all, so an evaluation could honestly report `n=4` over a window
+   * holding ten games and nothing anywhere said where the other six went. `n` alone cannot say
+   * it: `n` counts what the measure used, never what it wanted.
+   */
+  unreadable?: number;
+};
 
 /** Half-open `[from, until)`, so the baseline and the test window cannot share a game. */
 export type Window = { from: number; until: number };
@@ -336,6 +387,12 @@ export type Evaluation = {
   n: number;
   effect: number;
   verdict: Verdict;
+  /**
+   * Games in the window the measure could not read. NOT persisted: it is a fact about the
+   * cache at the moment of the evaluation, not about the evaluation, and it changes the day
+   * `riot_backfill_timelines` runs. Stored history would go stale and be read as if it had not.
+   */
+  unreadable: number;
 };
 
 /**
@@ -348,6 +405,15 @@ export type Evaluation = {
  *
  * An effect of exactly zero is `no_effect`, never `consistent` (G-012): agreement with a
  * direction requires a sign, and zero has none.
+ *
+ * An effect that is not FINITE is `unmeasurable`, never `no_effect` (G-005). NaN means the
+ * measure could not be taken — a bucket with nothing in it, a variance of zero, a series too
+ * short to fit — and `n` does not say so, because `n` counts the games the measure looked at
+ * and not the ones it could use. Reporting that as "no effect" hands back a conclusion drawn
+ * from a comparison that never happened.
+ *
+ * `insufficient_n` still comes first: below the declared n, nothing else about the number is
+ * worth saying, whether it came out finite or not.
  */
 export function verdictFor(
   direction: Direction,
@@ -356,7 +422,8 @@ export function verdictFor(
   nNeeded: number,
 ): Verdict {
   if (n < nNeeded) return 'insufficient_n';
-  if (!Number.isFinite(effect) || effect === 0) return 'no_effect';
+  if (!Number.isFinite(effect)) return 'unmeasurable';
+  if (effect === 0) return 'no_effect';
   if (direction === 'none') return 'no_effect';
   const wanted = direction === 'lower' ? -1 : 1;
   return Math.sign(effect) === wanted ? 'consistent' : 'inconsistent';
@@ -388,7 +455,7 @@ export function evaluateHypothesis(
     );
   }
 
-  const { n, effect } = measure(spec, {
+  const { n, effect, unreadable } = measure(spec, {
     from: hypothesis.testFrom,
     until: Number.POSITIVE_INFINITY,
   });
@@ -400,6 +467,7 @@ export function evaluateHypothesis(
     n,
     effect,
     verdict: verdictFor(hypothesis.direction, effect, n, hypothesis.nNeeded),
+    unreadable: unreadable ?? 0,
   };
 
   db.prepare(
@@ -429,6 +497,10 @@ export function evaluationsOf(db: Db, id: string): Evaluation[] {
     n: Number(r['n']),
     effect: effectFromDb(r['effect']),
     verdict: String(r['verdict']) as Verdict,
+    // History carries no `unreadable`: it was never stored, because it describes the cache and
+    // not the evaluation. Zero here means "not recorded", which is why nothing prints it for a
+    // past evaluation — only for the one just taken.
+    unreadable: 0,
   }));
 }
 

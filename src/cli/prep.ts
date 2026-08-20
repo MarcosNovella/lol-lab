@@ -1,7 +1,7 @@
 import { collectMatchups } from '../analysis/matchups.ts';
 import { sameChampion } from '../analysis/names.ts';
 import { confidenceOf, prepMatchup } from '../analysis/prep.ts';
-import { loadPriors, priorFor } from '../analysis/priors.ts';
+import { describePriorsProblem, priorFor, readPriors } from '../analysis/priors.ts';
 import { openDb } from '../store/db.ts';
 import { account as accountOf, CliError, labelOf, out } from './shared.ts';
 
@@ -32,7 +32,8 @@ export function run(argv: string[]): void {
     const opponent =
       rows.find((r) => sameChampion(r.opponent, opponentArg))?.opponent ?? opponentArg;
 
-    const prior = priorFor(loadPriors(), champion, opponent);
+    const read = readPriors();
+    const prior = priorFor(read.priors, champion, opponent);
 
     const prep = prepMatchup(rows, { champion, opponent, account: label, prior });
     const confidence = confidenceOf(prep);
@@ -55,6 +56,12 @@ export function run(argv: string[]): void {
     }
 
     out('');
+    // "There is no prior for this matchup" and "I could not read the priors file at all" are
+    // different facts and the estimate below depends on which one it is: without the meta the
+    // shrinkage falls back to his own record and `confidenceOf` says his record rules, which
+    // is a wrong confidence label rather than a missing one.
+    const priorsProblem = describePriorsProblem(read.problem);
+    if (priorsProblem !== null && read.problem.kind !== 'ausente') out(`  ${priorsProblem}`);
     if (prep.prior === null) {
       out('  Sin prior de op.gg para este matchup.');
     } else {

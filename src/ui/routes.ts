@@ -14,13 +14,18 @@ import {
 } from '../analysis/capture.ts';
 import { coverageOf, coverageTotals } from '../analysis/coverage.ts';
 import { stateCurve } from '../analysis/curve.ts';
-import { evaluationsOf, listHypotheses } from '../analysis/hypotheses.ts';
+import { evaluationsOf, listHypotheses, verdictLabel } from '../analysis/hypotheses.ts';
 import { itemRace } from '../analysis/items.ts';
 import { collectMatchups } from '../analysis/matchups.ts';
 import { deathsOf, describeDeath, expensiveMoments } from '../analysis/moments.ts';
 import { sameChampion } from '../analysis/names.ts';
 import { confidenceOf, prepMatchup } from '../analysis/prep.ts';
-import { loadPriors, priorFor, priorsKeyedLike } from '../analysis/priors.ts';
+import {
+  describePriorsProblem,
+  priorFor,
+  priorsKeyedLike,
+  readPriors,
+} from '../analysis/priors.ts';
 import { describeRank, latestSnapshot, TRACKED_QUEUES } from '../analysis/rank.ts';
 import { type DeathDot, deathMapSvg, goldCurveSvg, isOwnHalf } from '../analysis/render.ts';
 import { keyState } from '../riot/key.ts';
@@ -33,6 +38,7 @@ import {
   getRawTimeline,
   lastSync,
   listAccounts,
+  matchIdsMissingTimeline,
   queryParticipants,
 } from '../store/matches.ts';
 
@@ -48,7 +54,7 @@ import {
 /** A thing he could do right now, and why. The answer to "decime qué tengo que ejecutar". */
 export type Accion = {
   /** Stable id so the page can wire a button to it without matching on prose. */
-  id: 'taguear' | 'sync' | 'key' | 'resolver_cuenta';
+  id: 'taguear' | 'sync' | 'key' | 'resolver_cuenta' | 'backfill';
   urgencia: 'ahora' | 'cuando_puedas';
   que: string;
   porque: string;
@@ -58,6 +64,14 @@ export type EstadoCuenta = {
   label: string;
   puuid: string;
   pendientes: number;
+  /**
+   * Cached games with no timeline row, so no minute data at all.
+   *
+   * Not a cosmetic gap: without a timeline a game has no lane state, no conversion, no
+   * expensive moments, no build timings and no deaths on the map — it is absent from almost
+   * everything the panel draws, and nothing used to say so.
+   */
+  sinTimeline: number;
   /** Untagged games the cutoff decision left behind. Reported, never silently dropped. */
   dejadasAtras: number;
   ultimoSync: { at: number; terminado: boolean; fetched: number; error: string | null } | null;
@@ -100,6 +114,7 @@ export function estado(db: Db, now: number = Date.now()): Estado {
       label: account.label ?? account.gameName,
       puuid: account.puuid,
       pendientes,
+      sinTimeline: matchIdsMissingTimeline(db, { puuid: account.puuid }).length,
       dejadasAtras: abandonedByCutoff(db, account.puuid),
       ultimoSync:
         sync === null
@@ -144,6 +159,21 @@ export function estado(db: Db, now: number = Date.now()): Estado {
       porque:
         'Es lo único que separa "jugué mal" de "me tocó mal", y una partida sin taguear no se ' +
         'puede taguear más adelante.',
+    });
+  }
+
+  // A game with no timeline has no minute data, so it is silently absent from the lane state,
+  // the conversion, the expensive moments, the build timings and the death map — most of what
+  // this panel shows. It used to be repairable only by asking Claude to call an MCP tool.
+  const sinTimeline = cuentas.reduce((n, c) => n + c.sinTimeline, 0);
+  if (sinTimeline > 0) {
+    acciones.push({
+      id: 'backfill',
+      urgencia: 'cuando_puedas',
+      que: `Bajar ${sinTimeline} timeline${sinTimeline === 1 ? '' : 's'} que falta${sinTimeline === 1 ? '' : 'n'}`,
+      porque:
+        'Esas partidas están en la caché pero sin datos por minuto, así que no entran en la ' +
+        'curva, ni en los momentos caros, ni en el mapa. El sync de acá abajo las repara.',
     });
   }
 
@@ -363,8 +393,23 @@ export function syncEnCurso(): boolean {
 
 export type SyncEvento =
   | { tipo: 'inicio'; cuenta: string }
-  | { tipo: 'progreso'; hechas: number; total: number }
-  | { tipo: 'fin'; bajadas: number; timelines: number; remakes: number; errores: string[] }
+  /**
+   * `fase` names what is being downloaded, because the sync now has two of them and they take
+   * very different times: new games first, then the timelines of games already cached. A bar
+   * that restarted at zero with no label read as a bug.
+   */
+  | { tipo: 'progreso'; fase: 'partidas' | 'timelines'; hechas: number; total: number }
+  | {
+      tipo: 'fin';
+      bajadas: number;
+      timelines: number;
+      remakes: number;
+      /** Timelines repaired for games that were ALREADY in the cache. */
+      reparados: number;
+      /** Games still without one after this run — the limiter caps a run, so it can be > 0. */
+      sinTimeline: number;
+      errores: string[];
+    }
   | { tipo: 'error'; mensaje: string };
 
 /**
@@ -388,6 +433,18 @@ export async function sincronizar(
       remakes: number;
       errors: string[];
     }>;
+    /**
+     * Fetches timelines for games ALREADY cached, and is the second phase of the button.
+     *
+     * `syncMatches` only fetches a timeline for a match it is downloading right now, so a game
+     * cached without one stays without one no matter how many syncs run. The repair existed
+     * only behind an MCP tool, which meant the panel could not fix a hole it was itself the
+     * main victim of. Optional so a caller that only wants new games still compiles.
+     */
+    reparar?: (
+      puuid: string,
+      onProgress: (done: number, total: number) => void,
+    ) => Promise<{ fetched: number; errors: string[] }>;
     rango?: () => Promise<void>;
   },
 ): Promise<void> {
@@ -397,8 +454,20 @@ export async function sincronizar(
   try {
     emit({ tipo: 'inicio', cuenta: label });
     const result = await deps.sync(puuid, (hechas, total) =>
-      emit({ tipo: 'progreso', hechas, total }),
+      emit({ tipo: 'progreso', fase: 'partidas', hechas, total }),
     );
+
+    // Second phase: repair the games that were already here without minute data. It runs after
+    // the new games rather than before, so a rate limit that cuts the run short costs the
+    // repair of old history and never the download of tonight's games.
+    let reparados = 0;
+    if (deps.reparar) {
+      const repair = await deps.reparar(puuid, (hechas, total) =>
+        emit({ tipo: 'progreso', fase: 'timelines', hechas, total }),
+      );
+      reparados = repair.fetched;
+      result.errors.push(...repair.errors);
+    }
     // The rank clock is a nice-to-have and the sync is not: a failure here must not turn a
     // successful sync into a reported failure.
     if (deps.rango) {
@@ -416,6 +485,10 @@ export async function sincronizar(
       bajadas: result.fetched,
       timelines: result.timelines,
       remakes: result.remakes,
+      reparados,
+      // Counted after the fact rather than derived from the two numbers: the limiter caps a run,
+      // so "the phase finished" and "there is nothing left" are different facts.
+      sinTimeline: matchIdsMissingTimeline(db, { puuid }).length,
       errores: result.errors,
     });
   } catch (error) {
@@ -425,6 +498,49 @@ export async function sincronizar(
     // button for the rest of the process's life, with no way back but a restart.
     corriendo = false;
   }
+}
+
+/**
+ * Registers a Riot ID from the panel.
+ *
+ * The panel could show that no account existed and could not do anything about it: resolving
+ * one lived only behind the MCP tool, so the FIRST step of the workflow was the one step the
+ * execution surface could not execute. ADR-018 says the panel is where the ritual happens; a
+ * ritual you cannot start there is not one.
+ *
+ * The client is injected the same way the sync's is, so this route is testable without a key
+ * and without the network.
+ */
+export async function registrarCuenta(
+  db: Db,
+  input: { riotId: string; label: string | null },
+  resolver: (
+    gameName: string,
+    tagLine: string,
+    label?: string,
+  ) => Promise<{ label: string | null; gameName: string; tagLine: string }>,
+): Promise<{ label: string; gameName: string; tagLine: string }> {
+  // Split on the LAST '#': a game name may contain one, a tag line may not.
+  const cut = input.riotId.lastIndexOf('#');
+  if (cut <= 0 || cut === input.riotId.length - 1) {
+    throw new RouteError(
+      400,
+      `'${input.riotId}' no tiene forma de Riot ID. Va Nombre#TAG, como LegendofTorcuato#LAS.`,
+    );
+  }
+  const gameName = input.riotId.slice(0, cut);
+  const tagLine = input.riotId.slice(cut + 1);
+
+  const account = await resolver(
+    gameName,
+    tagLine,
+    ...(input.label !== null && input.label !== '' ? ([input.label] as const) : ([] as const)),
+  );
+  return {
+    label: account.label ?? account.gameName,
+    gameName: account.gameName,
+    tagLine: account.tagLine,
+  };
 }
 
 // ------------------------------------------------------------------------ lectura
@@ -631,6 +747,8 @@ export function cobertura(
 ): {
   alcance: { cuenta: string; cola: string; desde: number | null; remakes: string };
   totales: { matchups: number; reps: number; mudos: number };
+  /** Why the meta is missing, or null when it is not. See `describePriorsProblem`. */
+  problemaPriors: string | null;
   filas: {
     campeon: string;
     rival: string;
@@ -643,8 +761,9 @@ export function cobertura(
 } {
   const { label } = cuentaDe(db, cuenta);
   const rows = collectMatchups(db);
+  const read = readPriors();
   const priors = priorsKeyedLike(
-    loadPriors(),
+    read.priors,
     rows.map((r) => ({ champion: r.champion, opponent: r.opponent })),
   );
   const c = coverageOf(rows, { account: label, priors });
@@ -657,6 +776,9 @@ export function cobertura(
       remakes: c.scope.remakes,
     },
     totales: { matchups: totales.matchups, reps: totales.reps, mudos: totales.silent },
+    // Null when there is nothing to say. The panel prints it verbatim, so a CSV it cannot read
+    // is a visible line rather than a coverage table that quietly rests on his record alone.
+    problemaPriors: describePriorsProblem(read.problem),
     filas: c.rows.slice(0, limite).map((r) => ({
       campeon: r.champion,
       rival: r.opponent,
@@ -690,7 +812,8 @@ export function prep(
   // raw comparison here once manufactured a whole false discrepancy report (G-016).
   const mio = rows.find((r) => sameChampion(r.champion, campeon))?.champion ?? campeon;
   const suyo = rows.find((r) => sameChampion(r.opponent, rival))?.opponent ?? rival;
-  const prior = priorFor(loadPriors(), mio, suyo);
+  const readForPrep = readPriors();
+  const prior = priorFor(readForPrep.priors, mio, suyo);
   const p = prepMatchup(rows, { champion: mio, opponent: suyo, account: label, prior });
 
   return {
@@ -720,7 +843,9 @@ export function ledger(db: Db): {
   baselineN: number;
   necesita: number;
   cautela: string;
-  ultima: { veredicto: string; n: number } | null;
+  /** `veredicto` is the raw value; `lectura` is what it means, so the panel never has to
+   *  translate it and cannot disagree with the CLI about what `unmeasurable` is. */
+  ultima: { veredicto: string; lectura: string; n: number } | null;
 }[] {
   return listHypotheses(db).map((h) => {
     const last = evaluationsOf(db, h.id)[0];
@@ -731,7 +856,10 @@ export function ledger(db: Db): {
       baselineN: h.baselineN,
       necesita: h.nNeeded,
       cautela: h.caveat,
-      ultima: last === undefined ? null : { veredicto: last.verdict, n: last.n },
+      ultima:
+        last === undefined
+          ? null
+          : { veredicto: last.verdict, lectura: verdictLabel(last.verdict), n: last.n },
     };
   });
 }

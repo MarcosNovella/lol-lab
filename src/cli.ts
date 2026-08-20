@@ -1,6 +1,8 @@
 import * as assets from './cli/assets.ts';
+import * as backfill from './cli/backfill.ts';
 import * as cerrar from './cli/cerrar.ts';
 import * as cobertura from './cli/cobertura.ts';
+import * as cuenta from './cli/cuenta.ts';
 import * as growth from './cli/growth.ts';
 import * as hip from './cli/hip.ts';
 import * as items from './cli/items.ts';
@@ -35,6 +37,8 @@ type Command = {
 };
 
 const COMMANDS: Record<string, Command> = {
+  // First in the list because it is first in time: nothing else works before an account exists.
+  cuenta: { summary: cuenta.SUMMARY, usage: cuenta.USAGE, run: cuenta.run },
   ui: { summary: ui.SUMMARY, usage: ui.USAGE, run: ui.run },
   cerrar: { summary: cerrar.SUMMARY, usage: cerrar.USAGE, run: cerrar.run },
   report: { summary: report.SUMMARY, usage: report.USAGE, run: report.run },
@@ -44,6 +48,7 @@ const COMMANDS: Record<string, Command> = {
   page: { summary: page.SUMMARY, usage: page.USAGE, run: page.run },
   hip: { summary: hip.SUMMARY, usage: hip.USAGE, run: hip.run },
   items: { summary: items.SUMMARY, usage: items.USAGE, run: items.run },
+  backfill: { summary: backfill.SUMMARY, usage: backfill.USAGE, run: backfill.run },
   assets: { summary: assets.SUMMARY, usage: assets.USAGE, run: assets.run },
   rank: { summary: rank.SUMMARY, usage: rank.USAGE, run: rank.run },
 };

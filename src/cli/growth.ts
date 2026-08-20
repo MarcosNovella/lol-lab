@@ -13,6 +13,16 @@ import { account as accountOf, CliError, labelOf, out } from './shared.ts';
 
 const SPARK = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'] as const;
 
+/**
+ * Below this the drift is not a movement, it is the third decimal of a rolling mean.
+ *
+ * A judgement call, like `EVEN_GOLD_BAND`, and it says so: 0.005 CS per game is 0.2 CS over a
+ * forty-game season, which nobody would call a trend. The verdict is printed in units of the
+ * metric, so the floor lives in them too — and it exists because every other branch is relative
+ * to `dMine`, which makes them meaningless once `dMine` is itself noise.
+ */
+export const FLAT = 0.005;
+
 function bar(slot: number): string {
   return SPARK[Math.min(SPARK.length - 1, Math.max(0, slot))] ?? SPARK[0];
 }
@@ -21,6 +31,50 @@ function spark(values: number[], lo: number, hi: number): string {
   // A flat series is drawn flat at the bottom rather than dividing by zero.
   if (hi <= lo) return bar(0).repeat(values.length);
   return values.map((v) => bar(Math.round(((v - lo) / (hi - lo)) * (SPARK.length - 1)))).join('');
+}
+
+/**
+ * The honest reading of the two drifts, spelled out rather than left to the reader.
+ *
+ * Pure and exported so it can be tested: it is a chain of comparisons where the LAST branch is
+ * the one that makes a claim, which is the shape that hides a degenerate case until it prints
+ * one. It did. With both drifts at zero, `abs(0) > abs(0)` is false and `abs(0) < abs(0) / 2`
+ * is false, so two curves that never moved fell to the final branch, where `net >= 0` reads
+ * true and printed "tu línea se movió MÁS que la de los rivales (neto +0.000)". A claim of
+ * progress out of a pair of flat lines. Zero has no sign (G-012), and the degenerate case has
+ * to be REFUSED here rather than ranked with the others.
+ *
+ * `FLAT` is a floor under the whole verdict and not only a zero check, because every branch
+ * below the first is relative to `dMine`: once `dMine` is itself noise, the classification is
+ * reading the third decimal of a rolling mean and printing it as a finding.
+ */
+export function growthVerdict(dMine: number, dTheirs: number): string[] {
+  if (!Number.isFinite(dMine) || !Number.isFinite(dTheirs)) {
+    return ['  No se pudo medir la deriva de una de las dos curvas, así que no hay lectura.'];
+  }
+  if (Math.abs(dMine) < FLAT && Math.abs(dTheirs) < FLAT) {
+    return [
+      `  Ninguna de las dos curvas se movió (deriva por debajo de ${FLAT} por partida`,
+      '  en las dos). No hay nada que leer todavía.',
+    ];
+  }
+  if (Math.abs(dTheirs) > Math.abs(dMine)) {
+    return [
+      '  LEER CON CUIDADO: la línea de los rivales se movió MÁS que la tuya.',
+      '  Lo que cambió sobre todo es contra quién jugás, no cómo jugás.',
+    ];
+  }
+  const net = dMine - dTheirs;
+  if (Math.abs(net) < Math.abs(dMine) / 2) {
+    return [
+      '  Tu línea y la de los rivales se movieron juntas: buena parte de tu cambio',
+      '  es el nivel del lobby, no tuyo.',
+    ];
+  }
+  return [
+    `  Tu línea se movió ${net >= 0 ? 'más' : 'menos'} que la de los rivales`,
+    `  (neto ${net >= 0 ? '+' : ''}${net.toFixed(3)} por partida).`,
+  ];
 }
 
 function render(curve: GrowthCurve): void {
@@ -59,18 +113,7 @@ function render(curve: GrowthCurve): void {
   );
   out('');
 
-  // The honest reading, spelled out rather than left to the reader.
-  const net = dMine - dTheirs;
-  if (Math.abs(dTheirs) > Math.abs(dMine)) {
-    out('  LEER CON CUIDADO: la línea de los rivales se movió MÁS que la tuya.');
-    out('  Lo que cambió sobre todo es contra quién jugás, no cómo jugás.');
-  } else if (Math.abs(net) < Math.abs(dMine) / 2) {
-    out('  Tu línea y la de los rivales se movieron juntas: buena parte de tu cambio');
-    out('  es el nivel del lobby, no tuyo.');
-  } else {
-    out(`  Tu línea se movió ${net >= 0 ? 'más' : 'menos'} que la de los rivales`);
-    out(`  (neto ${net >= 0 ? '+' : ''}${net.toFixed(3)} por partida).`);
-  }
+  for (const line of growthVerdict(dMine, dTheirs)) out(line);
   out('');
   out('  Nada de esto separa progreso real de movimiento de MMR: llegan mezclados y esta');
   out('  fuente no los distingue. match-v5 no trae rango ni LP en ninguno de sus 156 campos,');

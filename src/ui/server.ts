@@ -7,7 +7,7 @@ import { safeAssetName } from '../riot/assets.ts';
 import { createClient } from '../riot/client.ts';
 import type { Db } from '../store/db.ts';
 import { ASSETS_ROOT, openDb } from '../store/db.ts';
-import { syncMatches } from '../sync.ts';
+import { backfillTimelines, resolveAccount, syncMatches } from '../sync.ts';
 import { renderShell } from './page.ts';
 import {
   abrirSesion,
@@ -21,6 +21,7 @@ import {
   pendientes,
   prep,
   RouteError,
+  registrarCuenta,
   type SyncEvento,
   sincronizar,
   taguear,
@@ -285,6 +286,26 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
       );
       return;
     }
+    if (url.pathname === '/api/cuenta' && request.method === 'POST') {
+      const body = await readJson(request);
+      const label = body['label'];
+      json(
+        response,
+        200,
+        await registrarCuenta(
+          db,
+          {
+            riotId: str(body, 'riotId'),
+            label: typeof label === 'string' && label !== '' ? label : null,
+          },
+          // The client is built per call, exactly like the sync's: ADR-005 re-reads the key on
+          // every request, so a key pasted after boot works without a restart.
+          (gameName, tagLine, accountLabel) =>
+            resolveAccount(createClient(), db, gameName, tagLine, accountLabel),
+        ),
+      );
+      return;
+    }
     if (url.pathname === '/api/dejar-atras' && request.method === 'POST') {
       json(response, 200, dejarAtras(db));
       return;
@@ -334,6 +355,14 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
             withTimeline: true,
             onProgress,
           });
+        },
+        // The second phase of the button: timelines for games ALREADY cached. Capped like the
+        // first, so one click can never turn into a seven-minute wait he did not ask for; it
+        // is idempotent, so the next click carries on where this one stopped.
+        reparar: async (puuid, onProgress) => {
+          const client = createClient();
+          const result = await backfillTimelines(client, db, { puuid, max: 20, onProgress });
+          return { fetched: result.fetched, errors: result.errors };
         },
         rango: async () => {
           await snapshotAll(db);

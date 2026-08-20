@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { flattenMatch } from '../src/analysis/flatten.ts';
 import { drift, GrowthError, growthCurve, trendSlope } from '../src/analysis/growth.ts';
+import { FLAT, growthVerdict } from '../src/cli/growth.ts';
 import type { MatchDto } from '../src/riot/types.ts';
 import { type Db, openDb } from '../src/store/db.ts';
 import { saveMatch } from '../src/store/matches.ts';
@@ -172,5 +173,46 @@ describe('the growth curve', () => {
   it('reports the fitted slope as NaN below two points, like drift', () => {
     seed(db, [{ id: 'LA2_1', at: 100, myCs: 50, theirCs: 60 }]);
     expect(Number.isNaN(trendSlope(curve(db).points, (p) => p.mineRolling))).toBe(true);
+  });
+});
+
+/**
+ * The verdict `lol growth` prints under the two curves.
+ *
+ * Born from a real print: with a fixture whose CS@10 never moved, the report said "tu línea se
+ * movió MÁS que la de los rivales (neto +0.000 por partida)". Every comparison in the chain was
+ * false and the claim lived in the fallback (G-012).
+ */
+describe('el veredicto de growth', () => {
+  it('refuses to read anything into two curves that did not move (G-012)', () => {
+    const lines = growthVerdict(0, 0).join(' ');
+    expect(lines).toContain('Ninguna de las dos curvas se movió');
+    expect(lines).not.toContain('más que la de los rivales');
+  });
+
+  it('treats a drift below the floor as flat, not as a tiny finding', () => {
+    // Reading the third decimal of a rolling mean and printing it as a trend is the same
+    // mistake as reading zero as a sign, one order of magnitude up.
+    const lines = growthVerdict(FLAT / 10, -FLAT / 10).join(' ');
+    expect(lines).toContain('Ninguna de las dos curvas se movió');
+  });
+
+  it('says nothing rather than guessing when a drift is not measurable', () => {
+    expect(growthVerdict(Number.NaN, 0).join(' ')).toContain('No se pudo medir');
+    expect(growthVerdict(0.5, Number.NaN).join(' ')).toContain('No se pudo medir');
+  });
+
+  it('still calls a real divergence a divergence', () => {
+    const lines = growthVerdict(0.4, 0.05).join(' ');
+    expect(lines).toContain('Tu línea se movió más');
+    expect(lines).toContain('+0.350');
+  });
+
+  it('still warns when the lobby moved more than he did', () => {
+    expect(growthVerdict(0.1, -0.6).join(' ')).toContain('LEER CON CUIDADO');
+  });
+
+  it('still calls two curves that moved together what they are', () => {
+    expect(growthVerdict(0.4, 0.35).join(' ')).toContain('se movieron juntas');
   });
 });

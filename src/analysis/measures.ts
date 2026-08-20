@@ -30,8 +30,23 @@ import { deathsOf } from './moments.ts';
  * effect whose null is 0.5 (a win rate) must be centred here, not interpreted later.
  */
 
-function rowsFor(db: Db, spec: AnalysisSpec, window: Window, minute: number): StateRow[] {
-  const { rows } = collectStates(db, {
+/**
+ * The lane states in the window, WITH the count of games that could not produce one.
+ *
+ * `collectStates` has always returned `skipped`, split by cause, under a comment saying these
+ * are never dropped silently. Nothing ever read it. The two causes are not the same thing and
+ * only one of them is fixable: `endedBeforeMinute` is an honest absence — a game that ended at
+ * 11' has no minute-14 state and never will — while `noTimeline` is a hole in the cache that
+ * `riot_backfill_timelines` closes. Only the second is reported, because only the second is
+ * something he can act on and the first would be noise on every short game.
+ */
+function rowsFor(
+  db: Db,
+  spec: AnalysisSpec,
+  window: Window,
+  minute: number,
+): { rows: StateRow[]; unreadable: number } {
+  const { rows, skipped } = collectStates(db, {
     puuid: spec.puuid,
     role: spec.role,
     queueId: spec.queueId,
@@ -39,7 +54,10 @@ function rowsFor(db: Db, spec: AnalysisSpec, window: Window, minute: number): St
     ...(Number.isFinite(window.until) ? { until: window.until } : {}),
     minute,
   });
-  return spec.champion === null ? rows : rows.filter((r) => r.champion === spec.champion);
+  return {
+    rows: spec.champion === null ? rows : rows.filter((r) => r.champion === spec.champion),
+    unreadable: skipped.noTimeline,
+  };
 }
 
 const mean = (xs: number[]): number =>
@@ -81,12 +99,12 @@ function conversionGapDeltaGold(
 ): Measurement {
   const start = rowsFor(db, spec, window, spec.minute);
   const later = new Map(
-    rowsFor(db, spec, window, spec.minute + 6).map((r) => [r.matchId, r] as const),
+    rowsFor(db, spec, window, spec.minute + 6).rows.map((r) => [r.matchId, r] as const),
   );
 
   const his: number[] = [];
   const theirs: number[] = [];
-  for (const row of start) {
+  for (const row of start.rows) {
     const end = later.get(row.matchId);
     if (!end) continue; // the game ended before the window closed — never extrapolated
     const delta = end.goldDiff - row.goldDiff;
@@ -94,8 +112,9 @@ function conversionGapDeltaGold(
     if (row.goldDiff < -band) theirs.push(-delta);
   }
   const n = his.length + theirs.length;
-  if (his.length === 0 || theirs.length === 0) return { n, effect: Number.NaN };
-  return { n, effect: mean(his) - mean(theirs) };
+  const unreadable = start.unreadable;
+  if (his.length === 0 || theirs.length === 0) return { n, effect: Number.NaN, unreadable };
+  return { n, effect: mean(his) - mean(theirs), unreadable };
 }
 
 /**
@@ -196,7 +215,7 @@ function wardBeforeObjective(db: Db, spec: VisionSpec, window: Window): Measurem
  * Centred at 0 — it is a difference of two rates, so the null is no difference, not 0.5.
  */
 function teamStateGivenLane(db: Db, spec: TeamStateSpec, window: Window): Measurement {
-  const { rows } = collectStates(db, {
+  const { rows, skipped } = collectStates(db, {
     puuid: spec.puuid,
     role: spec.role,
     queueId: spec.queueId,
@@ -210,12 +229,16 @@ function teamStateGivenLane(db: Db, spec: TeamStateSpec, window: Window): Measur
   const teamBehind = laneAhead.filter((r) => r.restOfTeamGoldDiff < -spec.teamBand);
 
   const n = teamAhead.length + teamBehind.length;
-  if (teamAhead.length === 0 || teamBehind.length === 0) return { n, effect: Number.NaN };
+  const unreadable = skipped.noTimeline;
+  if (teamAhead.length === 0 || teamBehind.length === 0) {
+    return { n, effect: Number.NaN, unreadable };
+  }
   return {
     n,
     effect:
       teamAhead.filter((r) => r.win).length / teamAhead.length -
       teamBehind.filter((r) => r.win).length / teamBehind.length,
+    unreadable,
   };
 }
 
@@ -268,7 +291,7 @@ function growthDrift(db: Db, spec: GrowthSpec, window: Window): Measurement {
  * Centred at 0 — a difference of two win rates, so the null is "no difference", not 0.5.
  */
 function phaseDeathRate(db: Db, spec: PhaseSpec, window: Window): Measurement {
-  const { rows } = collectStates(db, {
+  const { rows, skipped } = collectStates(db, {
     puuid: spec.puuid,
     role: spec.role,
     queueId: spec.queueId,
@@ -303,11 +326,13 @@ function phaseDeathRate(db: Db, spec: PhaseSpec, window: Window): Measurement {
   }
 
   const n = low.length + high.length;
-  if (low.length === 0 || high.length === 0) return { n, effect: Number.NaN };
+  const unreadable = skipped.noTimeline;
+  if (low.length === 0 || high.length === 0) return { n, effect: Number.NaN, unreadable };
   return {
     n,
     effect:
       low.filter((r) => r.win).length / low.length - high.filter((r) => r.win).length / high.length,
+    unreadable,
   };
 }
 
@@ -320,13 +345,15 @@ export function standardMeasure(db: Db): Measure {
     if ('rollingGames' in spec) return growthDrift(db, spec, window);
     if ('deathsPer10Threshold' in spec) return phaseDeathRate(db, spec, window);
     if (spec.stratum === 'none' && spec.outcome === 'binary_win') {
-      return conversionGapBinary(rowsFor(db, spec, window, spec.minute), spec.band);
+      const read = rowsFor(db, spec, window, spec.minute);
+      return { ...conversionGapBinary(read.rows, spec.band), unreadable: read.unreadable };
     }
     if (spec.stratum === 'none' && spec.outcome === 'delta_gold_6min') {
       return conversionGapDeltaGold(db, spec, window, spec.band);
     }
     if (spec.stratum === 'lane_even_or_behind' && spec.outcome === 'binary_win') {
-      return fromNeutralOrBehind(rowsFor(db, spec, window, spec.minute), spec.band);
+      const read = rowsFor(db, spec, window, spec.minute);
+      return { ...fromNeutralOrBehind(read.rows, spec.band), unreadable: read.unreadable };
     }
     throw new LedgerError(
       `no measure for stratum '${spec.stratum}' with outcome '${spec.outcome}'. ` +
@@ -378,5 +405,5 @@ export function countGapGames(db: Db, spec: Spec, baselineUntil: number, testFro
       minute: spec.gateMinute,
     }).rows.length;
   }
-  return rowsFor(db, spec, { from: baselineUntil, until: testFrom }, spec.minute).length;
+  return rowsFor(db, spec, { from: baselineUntil, until: testFrom }, spec.minute).rows.length;
 }

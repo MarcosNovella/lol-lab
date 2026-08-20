@@ -7,7 +7,12 @@ import {
   untaggedGames,
 } from '../analysis/capture.ts';
 import { coverageFor } from '../analysis/coverage.ts';
-import { type Evaluation, evaluateHypothesis, listHypotheses } from '../analysis/hypotheses.ts';
+import {
+  type Evaluation,
+  evaluateHypothesis,
+  listHypotheses,
+  verdictLabel,
+} from '../analysis/hypotheses.ts';
 import { collectMatchups } from '../analysis/matchups.ts';
 import { standardMeasure } from '../analysis/measures.ts';
 import { expensiveMoments } from '../analysis/moments.ts';
@@ -208,11 +213,19 @@ function changes(
       // night would train him to skip this block, and then the one night it changes he skips
       // that too.
       if (evaluation.verdict === 'insufficient_n') continue;
+      // `unmeasurable` is deliberately NOT skipped alongside it: it means the measure could
+      // not be taken at all, which is news about the ledger row itself rather than about the
+      // sample growing, and it is the one verdict that will not fix itself with more games.
       lines.push(
-        `  ${h.id}: ${evaluation.verdict} — n=${evaluation.n}, ` +
+        `  ${h.id}: ${verdictLabel(evaluation.verdict)} — n=${evaluation.n}, ` +
           `efecto ${Number.isFinite(evaluation.effect) ? evaluation.effect.toFixed(3) : '—'} ` +
           `(baseline ${h.baselineEffect.toFixed(3)} sobre n=${h.baselineN})`,
       );
+      if (evaluation.unreadable > 0) {
+        lines.push(
+          `    ojo: ${evaluation.unreadable} partida(s) sin timeline quedaron fuera de esa n.`,
+        );
+      }
     }
   }
 

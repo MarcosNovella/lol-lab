@@ -172,3 +172,122 @@ describe('benchmark', () => {
     expect(result.notes.join(' ')).toContain('Sin filtro de rol');
   });
 });
+
+/**
+ * G-009 as a test rather than as a paragraph.
+ *
+ * The rule was written the day "percentil 97 en ventaja de oro+XP en línea" shipped over a
+ * field that is 0 in 24 games and 1 in 12, and it stayed a line in `guardrails.md` while the
+ * two metrics that caused it went on being ranked. These pin the gate that closes it.
+ */
+describe('banderas 0/1 (G-009)', () => {
+  /** Seeds a lobby where the two lane-advantage flags actually vary, as they do in real data. */
+  function seedFlags(count: number) {
+    const db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'me',
+      gameName: 'Tester',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'test',
+    });
+    for (let i = 0; i < count; i += 1) {
+      const m = lobby({
+        matchId: `LA2_F${i}`,
+        myCsPerMinTarget: 7.2,
+        index: i,
+        gameCreation: 1_760_000_000_000 + i * 3_600_000,
+        win: i % 2 === 0,
+      });
+      // He trips the flag in two of every three games, his opponents in one of three: a real
+      // difference in RATE, and no difference in magnitude, because there is no magnitude.
+      for (const p of m.info.participants) {
+        const mine = p.puuid === 'me';
+        const on = mine ? i % 3 !== 0 : i % 3 === 0;
+        p.challenges = {
+          ...p.challenges,
+          earlyLaningPhaseGoldExpAdvantage: on ? 1 : 0,
+          laningPhaseGoldExpAdvantage: on ? 1 : 0,
+        };
+      }
+      saveMatch(db, flattenMatch(m), m);
+    }
+    return db;
+  }
+
+  it('never ranks a flag, however causal it is', () => {
+    const db = seedFlags(12);
+    const result = benchmark(db, { ...OPTS, role: 'MIDDLE', queueId: 420 });
+
+    const flag = result.comparisons.find((c) => c.key === 'lane_adv');
+    expect(flag).toBeDefined();
+    // `causal` clears G-008. It is the shape of the values that stops it here.
+    expect(flag?.contamination).toBe('causal');
+    expect(flag?.distribution).toBe('flag');
+    expect(flag?.rankable).toBe(false);
+    expect([...result.weakest, ...result.strongest].map((c) => c.key)).not.toContain('lane_adv');
+  });
+
+  it('hands back no percentile and no effect size for a flag, rather than a misleading one', () => {
+    const db = seedFlags(12);
+    const result = benchmark(db, { ...OPTS, role: 'MIDDLE', queueId: 420 });
+    const flag = result.comparisons.find((c) => c.key === 'early_lane_adv');
+
+    expect(flag?.percentile).toBeNull();
+    expect(flag?.effect).toBeNull();
+    // The rate survives, because the rate is the honest reading: he trips it more often.
+    expect(flag?.yours).toBeGreaterThan(flag?.peerMean ?? 1);
+  });
+
+  it('prints a flag as a rate and never as a percentile', () => {
+    const db = seedFlags(12);
+    const result = benchmark(db, { ...OPTS, role: 'MIDDLE', queueId: 420 });
+    const flag = result.comparisons.find((c) => c.key === 'lane_adv');
+    const line = formatComparison(flag as NonNullable<typeof flag>);
+
+    expect(line).toContain('bandera 0/1');
+    expect(line).toContain('de tus partidas');
+    expect(line).not.toContain('percentil');
+    expect(line).not.toContain('NaN');
+    expect(line).not.toContain('null');
+  });
+
+  it('still ranks an ordinary magnitude, so the gate is not just "rank nothing"', () => {
+    const db = seedFlags(12);
+    const result = benchmark(db, { ...OPTS, role: 'MIDDLE', queueId: 420 });
+    const cs = result.comparisons.find((c) => c.key === 'cs_first_10');
+
+    expect(cs?.distribution).toBe('magnitude');
+    expect(cs?.rankable).toBe(true);
+    expect(cs?.percentile).not.toBeNull();
+  });
+
+  it('demotes a DECLARED magnitude the sample shows to be binary, and says it out loud', () => {
+    // The declaration is a claim about Riot's data and `tsc` cannot check it. `turret_plates`
+    // is declared a magnitude and is genuinely a count; here every game has 0 or 1 of them,
+    // so the sample contradicts the catalogue and the sample wins.
+    const db = openDb(':memory:');
+    upsertAccount(db, { puuid: 'me', gameName: 'T', tagLine: 'LAS', platform: 'la2' });
+    for (let i = 0; i < 12; i += 1) {
+      const m = lobby({
+        matchId: `LA2_D${i}`,
+        index: i,
+        gameCreation: 1_760_000_000_000 + i * 3_600_000,
+        win: i % 2 === 0,
+      });
+      for (const p of m.info.participants) {
+        p.challenges = { ...p.challenges, turretPlatesTaken: i % 2 };
+      }
+      saveMatch(db, flattenMatch(m), m);
+    }
+
+    const result = benchmark(db, { ...OPTS, role: 'MIDDLE', queueId: 420 });
+    const plates = result.comparisons.find((c) => c.key === 'turret_plates');
+
+    expect(plates?.distribution).toBe('flag');
+    expect(plates?.rankable).toBe(false);
+    expect(plates?.percentile).toBeNull();
+    expect(result.notes.join(' ')).toContain('Placas de torreta');
+    expect(result.notes.join(' ')).toContain('declarada como magnitud');
+  });
+});

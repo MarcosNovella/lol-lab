@@ -24,10 +24,14 @@ export function account(db: Db, needle: string): AccountRecord {
   const known = listAccounts(db)
     .map((a) => a.label ?? a.gameName)
     .join(', ');
+  // In Spanish, like the rest of the CLI, and pointing at a command that exists here: it used
+  // to send him to `riot_resolve_account`, which is an MCP tool and cannot be run from a
+  // terminal at all — the error told him to leave the program to fix the program.
   throw new CliError(
     known === ''
-      ? `no account '${needle}': the cache has none at all — run riot_resolve_account first`
-      : `no account '${needle}'. Known: ${known}`,
+      ? `no conozco la cuenta '${needle}', y de hecho no hay ninguna en la caché. ` +
+          'Empezá por `lol cuenta <Nombre#TAG> [etiqueta]`.'
+      : `no conozco la cuenta '${needle}'. Las que hay: ${known}.`,
   );
 }
 

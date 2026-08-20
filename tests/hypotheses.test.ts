@@ -13,6 +13,7 @@ import {
   retireHypothesis,
   specHash,
   verdictFor,
+  verdictLabel,
   type Window,
 } from '../src/analysis/hypotheses.ts';
 import { type Db, openDb } from '../src/store/db.ts';
@@ -164,8 +165,30 @@ describe('verdicts stay honest below the required n', () => {
     expect(verdictFor('higher', 0, 300, 300)).toBe('no_effect');
   });
 
-  it('calls an unmeasurable effect no_effect rather than guessing', () => {
-    expect(verdictFor('lower', Number.NaN, 300, 300)).toBe('no_effect');
+  it('calls an unmeasurable effect unmeasurable, never no_effect (G-005)', () => {
+    // These are two different answers and used to be one. "There is no difference" is a
+    // finding; "the measure could not be taken" is the absence of one. `conversionGapBinary`
+    // returns NaN with a LARGE n whenever one of its two buckets is empty, so the collapsed
+    // version published a conclusion drawn from a comparison that never happened.
+    expect(verdictFor('lower', Number.NaN, 300, 300)).toBe('unmeasurable');
+    expect(verdictFor('higher', Number.POSITIVE_INFINITY, 300, 300)).toBe('unmeasurable');
+    expect(verdictFor('none', Number.NaN, 300, 300)).toBe('unmeasurable');
+  });
+
+  it('still puts insufficient_n ahead of it: below the declared n nothing else is worth saying', () => {
+    expect(verdictFor('lower', Number.NaN, 12, 300)).toBe('insufficient_n');
+  });
+
+  it('gives every verdict a sentence, so no front-end has to translate one', () => {
+    const all = [
+      'insufficient_n',
+      'consistent',
+      'inconsistent',
+      'no_effect',
+      'unmeasurable',
+    ] as const;
+    for (const v of all) expect(verdictLabel(v).length).toBeGreaterThan(0);
+    expect(verdictLabel('unmeasurable')).toContain('NO MEDIBLE');
   });
 });
 

@@ -36,6 +36,27 @@ export type MetricGroup = 'economía' | 'daño' | 'línea' | 'visión' | 'peleas
  */
 export type Contamination = 'causal' | 'contaminated' | 'conditional';
 
+/**
+ * The SHAPE of the values, which is a different question from what they measure (G-009).
+ *
+ * - `magnitude` a real quantity: a mean, a percentile and an effect size all say something.
+ * - `flag`      a 0/1 indicator. Its mean is a RATE and reads fine; a percentile over it says
+ *               only "he trips it more often than his peers", never BY HOW MUCH, and Cohen's d
+ *               over two Bernoullis is a number that looks like an effect size and is not one.
+ * - `ordinal`   ranked categories with no fixed spacing, so the arithmetic is not defined.
+ *
+ * Required, never defaulted, for the same reason `contamination` is: `laningPhaseGoldExpAdvantage`
+ * is a flag (0 in 24 games, 1 in 12) and was reported as "percentil 97 en ventaja de oro+XP en
+ * línea". G-009 was written the day that shipped and stayed a rule in a markdown file for two
+ * days; this field is the rule made structural.
+ *
+ * The declaration is a CLAIM ABOUT RIOT'S DATA and this project has no way to verify it at
+ * compile time, so `benchmark()` re-checks every declared `magnitude` against the sample it
+ * actually has (`looksBinary`) and demotes it — with a note — when the data disagrees. Declaring
+ * one wrong costs a note, never a false percentile.
+ */
+export type Distribution = 'magnitude' | 'flag' | 'ordinal';
+
 export type Metric = {
   key: string;
   label: string;
@@ -44,6 +65,8 @@ export type Metric = {
   roleSpecific: boolean;
   /** Required, never defaulted: a new metric must be classified deliberately (G-008). */
   contamination: Contamination;
+  /** Required, never defaulted: only a `magnitude` may be ranked or given a percentile (G-009). */
+  distribution: Distribution;
   decimals: number;
   /** Null means Riot did not report it for this match; the metric skips that row. */
   get: (row: MatchListRow) => number | null;
@@ -54,6 +77,7 @@ export type Metric = {
 export const METRICS: Metric[] = [
   {
     key: 'cs_per_min',
+    distribution: 'magnitude',
     contamination: 'contaminated',
     label: 'CS por minuto',
     group: 'economía',
@@ -64,6 +88,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'gold_per_min',
+    distribution: 'magnitude',
     contamination: 'contaminated',
     label: 'Oro por minuto',
     group: 'economía',
@@ -74,6 +99,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'cs_first_10',
+    distribution: 'magnitude',
     contamination: 'causal',
     label: 'CS a los 10 minutos',
     group: 'línea',
@@ -84,6 +110,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'max_cs_adv_on_lane',
+    distribution: 'magnitude',
     contamination: 'contaminated',
     label: 'Máxima ventaja de CS sobre el rival de línea',
     group: 'línea',
@@ -94,6 +121,8 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'early_lane_adv',
+    // Riot's `earlyLaningPhaseGoldExpAdvantage`: a 0/1 flag, not a magnitude (G-009).
+    distribution: 'flag',
     contamination: 'causal',
     label: 'Ventaja de oro+XP temprana',
     group: 'línea',
@@ -104,6 +133,9 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'lane_adv',
+    // Riot's `laningPhaseGoldExpAdvantage`: a 0/1 flag, and it matched
+    // `early_lane_adv` in all 36 games of the corpus it was measured on — the same signal twice.
+    distribution: 'flag',
     contamination: 'causal',
     label: 'Ventaja de oro+XP en fase de líneas',
     group: 'línea',
@@ -114,6 +146,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'turret_plates',
+    distribution: 'magnitude',
     contamination: 'causal',
     label: 'Placas de torreta',
     group: 'línea',
@@ -124,6 +157,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'damage_per_min',
+    distribution: 'magnitude',
     contamination: 'contaminated',
     label: 'Daño a campeones por minuto',
     group: 'daño',
@@ -134,6 +168,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'team_damage_share',
+    distribution: 'magnitude',
     contamination: 'contaminated',
     label: 'Porcentaje del daño del equipo',
     group: 'daño',
@@ -145,6 +180,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'damage_taken_per_min',
+    distribution: 'magnitude',
     contamination: 'contaminated',
     label: 'Daño recibido por minuto',
     group: 'daño',
@@ -155,6 +191,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'deaths_per_min',
+    distribution: 'magnitude',
     contamination: 'contaminated',
     label: 'Muertes por minuto',
     group: 'peleas',
@@ -165,6 +202,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'kill_participation',
+    distribution: 'magnitude',
     contamination: 'contaminated',
     label: 'Participación en kills',
     group: 'peleas',
@@ -176,6 +214,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'kda',
+    distribution: 'magnitude',
     contamination: 'contaminated',
     label: 'KDA',
     group: 'peleas',
@@ -186,6 +225,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'solo_kills',
+    distribution: 'magnitude',
     contamination: 'contaminated',
     label: 'Solo kills',
     group: 'peleas',
@@ -196,6 +236,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'vision_per_min',
+    distribution: 'magnitude',
     contamination: 'contaminated',
     label: 'Vision score por minuto',
     group: 'visión',
@@ -206,6 +247,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'control_wards',
+    distribution: 'magnitude',
     contamination: 'contaminated',
     label: 'Guardianes de control comprados',
     group: 'visión',
@@ -216,6 +258,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'wards_killed',
+    distribution: 'magnitude',
     contamination: 'contaminated',
     label: 'Wards enemigas destruidas',
     group: 'visión',
@@ -226,6 +269,7 @@ export const METRICS: Metric[] = [
   },
   {
     key: 'damage_objectives',
+    distribution: 'magnitude',
     contamination: 'contaminated',
     label: 'Daño a objetivos por partida',
     group: 'objetivos',

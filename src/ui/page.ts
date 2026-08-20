@@ -189,6 +189,9 @@ function renderCuentas(cuentas) {
     // Stated, not hidden: the decision left these behind and the panel says how many, so the
     // number never quietly becomes "there was nothing there".
     if (c.dejadasAtras > 0) add('dejadas atrás', String(c.dejadasAtras) + ' (a propósito)');
+    // Same principle as the line above: a game with no timeline is missing from almost every
+    // number on this page, so the count is stated rather than left to be inferred from a gap.
+    if (c.sinTimeline > 0) add('sin timeline', String(c.sinTimeline) + ' (sin datos por minuto)');
     add(
       'último sync',
       c.ultimoSync === null
@@ -396,12 +399,18 @@ function renderSync() {
       if (e.tipo === 'inicio') log.textContent = 'sincronizando ' + e.cuenta + '…';
       if (e.tipo === 'progreso') {
         relleno.style.width = (e.total === 0 ? 0 : (e.hechas / e.total) * 100) + '%';
-        log.textContent = e.hechas + ' de ' + e.total;
+        // The phase is named because the bar restarts at zero for the second one, and an
+        // unlabelled bar going back to zero reads as a bug rather than as a second job.
+        const que = e.fase === 'timelines' ? ' timelines de partidas ya bajadas' : ' partidas';
+        log.textContent = e.hechas + ' de ' + e.total + que;
       }
       if (e.tipo === 'fin') {
         relleno.style.width = '100%';
         log.textContent =
           e.bajadas + ' nueva(s), ' + e.timelines + ' timeline(s), ' + e.remakes + ' remake(s)' +
+          (e.reparados ? ', ' + e.reparados + ' timeline(s) viejo(s) reparado(s)' : '') +
+          // Said out loud: one click is capped, so "finished" is not "there is nothing left".
+          (e.sinTimeline ? ', quedan ' + e.sinTimeline + ' sin timeline (dale de nuevo)' : '') +
           (e.errores.length ? '\\n' + e.errores.slice(0, 3).join('\\n') : '');
         src.close();
         boton.disabled = false;
@@ -547,6 +556,9 @@ async function renderCobertura() {
   card.append(el('div', 'porque',
     c.totales.matchups + ' matchups · ' + c.totales.reps + ' reps · ' +
     c.totales.mudos + ' sobre los que no puedo decir nada'));
+  // The meta is either here, absent (normal), or present and unreadable (not normal). The
+  // table below looks identical in all three cases, so the difference has to be said out loud.
+  if (c.problemaPriors) card.append(el('div', 'porque', c.problemaPriors));
 
   const table = document.createElement('table');
   const head = document.createElement('tr');
@@ -596,7 +608,7 @@ async function renderLedger() {
     card.append(el('div', 'porque',
       'baseline ' + h.baseline.toFixed(3) + ' sobre n=' + h.baselineN +
       ' · necesita n=' + h.necesita +
-      (h.ultima ? ' · última: ' + h.ultima.veredicto + ' (n=' + h.ultima.n + ')' : ' · sin evaluar')));
+      (h.ultima ? ' · última: ' + h.ultima.lectura + ' (n=' + h.ultima.n + ')' : ' · sin evaluar')));
     card.append(el('div', 'alcance', 'cautela: ' + h.cautela));
     box.append(card);
   }
@@ -644,6 +656,53 @@ function renderPrep() {
   };
 }
 
+/**
+ * The first-run form.
+ *
+ * Before it, a fresh cache made this page a wall: /api/estado answered with an empty account
+ * list and the five reading sections each 404'd with "no conozco la cuenta 'smurf'", which the
+ * error line showed one at a time with nothing to do about any of them. Resolving an account
+ * lived only behind the MCP tool, so the panel could DIAGNOSE the empty cache and not fix it.
+ */
+function renderPrimeraVez() {
+  const box = document.getElementById('primera-vez');
+  box.replaceChildren();
+  const card = el('div', 'card');
+  card.append(el('h2', null, 'Empezá por acá'));
+  card.append(el('div', 'porque',
+    'No hay ninguna cuenta todavía. Poné tu Riot ID como aparece en el cliente ' +
+    '(Nombre#TAG) y una etiqueta corta para llamarla después.'));
+
+  const riotId = document.createElement('input');
+  riotId.placeholder = 'LegendofTorcuato#LAS';
+  riotId.size = 24;
+  const etiqueta = document.createElement('input');
+  etiqueta.placeholder = 'smurf';
+  etiqueta.size = 10;
+  const boton = el('button', null, 'Registrar');
+  const salida = el('div', 'porque', '');
+
+  card.append(riotId, etiqueta, boton, salida);
+  box.append(card);
+
+  boton.onclick = async () => {
+    if (!riotId.value) return;
+    boton.disabled = true;
+    salida.textContent = 'preguntándole a Riot…';
+    try {
+      const r = await post('/api/cuenta', { riotId: riotId.value, label: etiqueta.value });
+      salida.textContent = r.gameName + '#' + r.tagLine + ' guardada como ' + r.label +
+        '. Ahora dale a sincronizar.';
+      await arrancar();
+    } catch (err) {
+      // The most likely failure by far is a missing or expired key, and the message from the
+      // client already says so — repeating it here is what stops this looking like a bad ID.
+      salida.textContent = 'Error: ' + err.message;
+      boton.disabled = false;
+    }
+  };
+}
+
 async function refrescar() {
   try {
     const e = await api('/api/estado');
@@ -651,8 +710,10 @@ async function refrescar() {
     renderCuentas(e.cuentas);
     renderKey(e.key);
     document.getElementById('error').textContent = '';
+    return e;
   } catch (err) {
     document.getElementById('error').textContent = 'Error: ' + err.message;
+    return null;
   }
 }
 
@@ -660,14 +721,38 @@ const fallar = (err) => {
   document.getElementById('error').textContent = 'Error: ' + err.message;
 };
 
-refrescar();
-renderSync();
-renderPrep();
-renderPendientes().catch(fallar);
-renderMomentos().catch(fallar);
-renderGraficos().catch(fallar);
-renderCobertura().catch(fallar);
-renderLedger().catch(fallar);
+/**
+ * Draws the page for the state the cache is actually in.
+ *
+ * With no accounts the reading sections are not rendered at all, rather than rendered and
+ * allowed to fail: five 404s about an account nobody claimed exists are not five problems, and
+ * showing them as errors buries the ONE thing to do behind noise.
+ */
+async function arrancar() {
+  const estado = await refrescar();
+  const vacia = estado !== null && estado.cuentas.length === 0;
+
+  document.getElementById('primera-vez').hidden = !vacia;
+  // Whole sections, heading included: hiding only the body would leave a column of empty
+  // headings, which reads as broken rather than as empty.
+  for (const node of document.querySelectorAll('section.solo-con-cuenta')) {
+    node.hidden = vacia;
+  }
+  if (vacia) {
+    renderPrimeraVez();
+    return;
+  }
+
+  renderSync();
+  renderPrep();
+  renderPendientes().catch(fallar);
+  renderMomentos().catch(fallar);
+  renderGraficos().catch(fallar);
+  renderCobertura().catch(fallar);
+  renderLedger().catch(fallar);
+}
+
+arrancar();
 // Every 60s, and only the panel — it reads the database and spends no Riot request, so polling
 // it cannot eat the rate limit the sync needs.
 // The poll refreshes the PANEL and deliberately not the tagging list. Re-rendering that list
@@ -701,30 +786,46 @@ El token cambia en cada arranque, así que un favorito viejo no sirve.</p>
   <p class="sub">Local, en tu máquina. Nada de esto sale de acá.</p>
   <div id="error" class="dim"></div>
 
+  <div id="primera-vez" hidden></div>
+
   <h2>Qué hacer ahora</h2>
   <div id="acciones"></div>
 
-  <h2>Sincronizar</h2>
-  <div id="sync"></div>
+  <section class="solo-con-cuenta">
+    <h2>Sincronizar</h2>
+    <div id="sync"></div>
+  </section>
 
-  <h2>Taguear</h2>
-  <div id="pendientes"></div>
-  <div id="tilt"></div>
+  <section class="solo-con-cuenta">
+    <h2>Taguear</h2>
+    <div id="pendientes"></div>
+    <div id="tilt"></div>
+  </section>
 
-  <h2>Lo que salió caro</h2>
-  <div id="momentos"></div>
+  <section class="solo-con-cuenta">
+    <h2>Lo que salió caro</h2>
+    <div id="momentos"></div>
+  </section>
 
-  <h2>Antes de entrar</h2>
-  <div id="prep"></div>
+  <section class="solo-con-cuenta">
+    <h2>Antes de entrar</h2>
+    <div id="prep"></div>
+  </section>
 
-  <h2>Curva y mapa</h2>
-  <div id="graficos"></div>
+  <section class="solo-con-cuenta">
+    <h2>Curva y mapa</h2>
+    <div id="graficos"></div>
+  </section>
 
-  <h2>De qué no puedo hablar todavía</h2>
-  <div id="cobertura"></div>
+  <section class="solo-con-cuenta">
+    <h2>De qué no puedo hablar todavía</h2>
+    <div id="cobertura"></div>
+  </section>
 
-  <h2>Hipótesis registradas</h2>
-  <div id="ledger"></div>
+  <section class="solo-con-cuenta">
+    <h2>Hipótesis registradas</h2>
+    <div id="ledger"></div>
+  </section>
 
   <h2>Cuentas</h2>
   <div id="cuentas"></div>

@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { flattenMatch } from '../src/analysis/flatten.ts';
 import type { AnalysisSpec } from '../src/analysis/hypotheses.ts';
-import { LedgerError } from '../src/analysis/hypotheses.ts';
+import {
+  evaluateHypothesis,
+  evaluationsOf,
+  LedgerError,
+  registerHypothesis,
+} from '../src/analysis/hypotheses.ts';
 import { countGapGames, standardMeasure } from '../src/analysis/measures.ts';
 import type { MatchDto, TimelineDto } from '../src/riot/types.ts';
 import { type Db, openDb } from '../src/store/db.ts';
@@ -194,5 +199,66 @@ describe('unsupported specs', () => {
     expect(() =>
       standardMeasure(db)({ ...SPEC, stratum: 'lane_ahead', outcome: 'delta_gold_6min' }, WHOLE),
     ).toThrow(LedgerError);
+  });
+});
+
+/**
+ * Games the measure could not read at all.
+ *
+ * `collectStates` has counted these since it was written, under a comment saying they are never
+ * dropped silently, and no front-end ever read the field. With `riot_sync` defaulting to
+ * `withTimeline: false` the case is not exotic: a synced game with no timeline has no lane
+ * state, so it is absent from `n` and from everything else, and `n` cannot say so — `n` counts
+ * what the measure used, never what it wanted.
+ */
+describe('las partidas que no se pudieron leer', () => {
+  const GAMES: Game[] = [
+    { id: 'LA2_U1', at: 10, win: true, lead14: 2000 },
+    { id: 'LA2_U2', at: 20, win: false, lead14: 2000 },
+    { id: 'LA2_U3', at: 30, win: false, lead14: -2000 },
+    { id: 'LA2_U4', at: 40, win: true, lead14: -2000 },
+  ];
+
+  it('counts a game with no timeline instead of dropping it out of the world', () => {
+    seed(db, GAMES);
+    // One game loses its timeline: cached, played, inside the window, and invisible.
+    db.prepare('DELETE FROM timelines WHERE match_id = ?').run('LA2_U1');
+
+    const m = standardMeasure(db)(SPEC, WHOLE);
+
+    expect(m.unreadable).toBe(1);
+    // And it really is missing from the measurement, which is the point: n counts what the
+    // measure USED, so it cannot be the thing that reports what it could not read.
+    expect(m.n).toBe(3);
+  });
+
+  it('reports zero when every game in the window could be read', () => {
+    seed(db, GAMES);
+    expect(standardMeasure(db)(SPEC, WHOLE).unreadable ?? 0).toBe(0);
+  });
+
+  it('carries the count onto the evaluation, where somebody actually reads it', () => {
+    seed(db, GAMES);
+    db.prepare('DELETE FROM timelines WHERE match_id = ?').run('LA2_U1');
+
+    registerHypothesis(db, {
+      id: 'sin_timeline',
+      claim: 'da igual: lo que se prueba es el contador',
+      direction: 'lower',
+      spec: SPEC,
+      baselineUntil: 1,
+      testFrom: 1,
+      gapGames: 0,
+      baselineN: 10,
+      baselineEffect: -0.1,
+      nNeeded: 300,
+      caveat: 'ninguna, es un test',
+    });
+
+    const evaluation = evaluateHypothesis(db, 'sin_timeline', SPEC, standardMeasure(db));
+    expect(evaluation.unreadable).toBe(1);
+    // NOT persisted: it describes the cache today, and `lol backfill` changes it. A stored
+    // history of it would go stale and be read as though it had not.
+    expect(evaluationsOf(db, 'sin_timeline')[0]?.unreadable).toBe(0);
   });
 });

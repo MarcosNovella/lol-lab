@@ -436,7 +436,9 @@ server.registerTool(
 
     if (full) {
       lines.push('TODAS LAS MÉTRICAS (de peor a mejor)');
-      const sorted = [...result.comparisons].sort((a, b) => a.effect - b.effect);
+      // Sorted on `score`, not on `effect`: `effect` is null for a flag and NaN when there is
+      // no spread, and `score` is the field that exists to be the ranking key in both cases.
+      const sorted = [...result.comparisons].sort((a, b) => a.score - b.score);
       for (const c of sorted) {
         lines.push(`${c.enoughData ? '' : '[muestra chica] '}${formatComparison(c)}`);
       }

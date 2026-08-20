@@ -1,7 +1,14 @@
 import type { Db } from '../store/db.ts';
 import { type MatchListRow, queryParticipants } from '../store/matches.ts';
-import { type Contamination, METRICS, type Metric, type Role, roleLabel } from './metrics.ts';
-import { cohensD, mean, median, percentileOf, round } from './stats.ts';
+import {
+  type Contamination,
+  type Distribution,
+  METRICS,
+  type Metric,
+  type Role,
+  roleLabel,
+} from './metrics.ts';
+import { cohensD, looksBinary, mean, median, percentileOf, round } from './stats.ts';
 
 /**
  * "Where am I losing versus my own elo."
@@ -27,9 +34,15 @@ export type MetricComparison = {
   higherIsBetter: boolean;
   contamination: Contamination;
   /**
+   * The shape of the values AS OBSERVED in this sample, which can differ from what the
+   * catalogue declares: a metric declared `magnitude` whose observations are all 0/1 is
+   * reported here as the `flag` it turned out to be, and `notes` says so (G-009).
+   */
+  distribution: Distribution;
+  /**
    * Whether this comparison is allowed to headline the report. False for a contaminated
-   * metric read outside a stratum: the number is still computed and shown, but it may not be
-   * ranked or called a leak (G-008).
+   * metric read outside a stratum (G-008), and false for anything that is not a magnitude:
+   * a 0/1 flag has no size to rank by, only a rate (G-009).
    */
   rankable: boolean;
   games: number;
@@ -39,13 +52,23 @@ export type MetricComparison = {
   peerMedian: number;
   diff: number;
   diffPct: number | null;
-  /** Where his average game sits inside the pile of peer games, 0-100. */
-  percentile: number;
+  /**
+   * Where his average game sits inside the pile of peer games, 0-100.
+   *
+   * NULL for anything that is not a magnitude. A percentile over a 0/1 flag ranks him by how
+   * OFTEN he trips it and then prints as though it ranked him by how much — which is exactly
+   * the "percentil 97 en ventaja de oro+XP" that G-009 exists to prevent. For a flag the
+   * honest numbers are already here: `yours` and `peerMean` are the two rates.
+   */
+  percentile: number | null;
   /**
    * Cohen's d, sign-flipped so positive ALWAYS means he is doing better.
+   *
    * NaN when both distributions are constant — there is no spread to express the gap in.
+   * NULL, and not computed at all, when the metric is not a magnitude: d over two Bernoullis
+   * is defined arithmetically and means nothing anyone would read off it (G-009).
    */
-  effect: number;
+  effect: number | null;
   /**
    * What the ranking sorts on. Equals `effect` whenever that is defined; when it is not,
    * falls back to the direction of the raw gap so a real difference between two tight
@@ -171,6 +194,8 @@ export function benchmark(db: Db, options: BenchmarkOptions): BenchmarkResult {
   }
 
   const comparisons: MetricComparison[] = [];
+  /** Metrics whose declared shape the data contradicted. Named in `notes`, never swallowed. */
+  const demotedKeys: string[] = [];
   for (const metric of METRICS) {
     const peerRows = metric.roleSpecific ? sameRolePeers : everyone;
     const mineValues = collect(mine, metric);
@@ -180,10 +205,23 @@ export function benchmark(db: Db, options: BenchmarkOptions): BenchmarkResult {
 
     const yours = mean(mineValues);
     const peerMean = mean(peerValues);
-    const rawEffect = cohensD(mineValues, peerValues);
+
+    // What the catalogue CLAIMS, checked against what arrived. A declaration about Riot's data
+    // cannot be verified by `tsc`, so the sample gets a vote: a declared magnitude observed as
+    // all-0/1 on both sides is demoted here and named in `notes` (G-009). Both sides, because
+    // one side happening to be constant is a small sample, not a flag.
+    const declared = metric.distribution;
+    const demoted = declared === 'magnitude' && looksBinary(mineValues) && looksBinary(peerValues);
+    const distribution: Distribution = demoted ? 'flag' : declared;
+    if (demoted) demotedKeys.push(metric.label);
+    const isMagnitude = distribution === 'magnitude';
+
+    // Computed ONLY for a magnitude. Not computed and then hidden: a number that exists gets
+    // read eventually, and these two are the pair that headlined a percentile over a flag.
+    const rawEffect = isMagnitude ? cohensD(mineValues, peerValues) : Number.NaN;
     // Flip so a positive number always reads as "he is ahead", whatever the metric measures.
     const effect = metric.higherIsBetter ? rawEffect : -rawEffect;
-    const rawPercentile = percentileOf(yours, peerValues);
+    const rawPercentile = isMagnitude ? percentileOf(yours, peerValues) : Number.NaN;
     const percentile = metric.higherIsBetter ? rawPercentile : 100 - rawPercentile;
     const enoughData = mineValues.length >= MIN_GAMES && peerValues.length >= MIN_PEERS;
 
@@ -219,7 +257,11 @@ export function benchmark(db: Db, options: BenchmarkOptions): BenchmarkResult {
       unit: metric.unit ?? null,
       higherIsBetter: metric.higherIsBetter,
       contamination: metric.contamination,
-      rankable: metric.contamination === 'causal' || options.stratum !== undefined,
+      distribution,
+      // Two independent gates, and a metric has to clear both. G-008 asks whether the number is
+      // downstream of the result; G-009 asks whether it has a size at all. A causal flag passes
+      // the first and fails the second, which is precisely the case that shipped.
+      rankable: isMagnitude && (metric.contamination === 'causal' || options.stratum !== undefined),
       games: mineValues.length,
       peers: peerValues.length,
       yours: round(yours, metric.decimals),
@@ -227,8 +269,8 @@ export function benchmark(db: Db, options: BenchmarkOptions): BenchmarkResult {
       peerMedian: round(median(peerValues), metric.decimals),
       diff: round(yours - peerMean, metric.decimals),
       diffPct: peerMean !== 0 ? round(((yours - peerMean) / Math.abs(peerMean)) * 100, 1) : null,
-      percentile: round(percentile, 1),
-      effect: round(effect, 2),
+      percentile: isMagnitude ? round(percentile, 1) : null,
+      effect: isMagnitude ? round(effect, 2) : null,
       score: round(score, 2),
       headToHead,
       severity: severityOf(score, enoughData),
@@ -253,13 +295,34 @@ export function benchmark(db: Db, options: BenchmarkOptions): BenchmarkResult {
         `(mínimo ${MIN_GAMES} partidas tuyas y ${MIN_PEERS} de referencia).`,
     );
   }
-  const blocked = comparisons.filter((c) => !c.rankable).length;
-  if (blocked > 0) {
+  // The two reasons a metric cannot be ranked are counted apart, because the answer to each is
+  // different: a contaminated metric becomes rankable inside a stratum, a flag never does.
+  const contaminated = comparisons.filter(
+    (c) => !c.rankable && c.distribution === 'magnitude',
+  ).length;
+  if (contaminated > 0) {
     notes.push(
-      `${blocked} métrica(s) quedaron FUERA del ranking por estar contaminadas por el ` +
+      `${contaminated} métrica(s) quedaron FUERA del ranking por estar contaminadas por el ` +
         'resultado: KDA, CS/min, daño, muertes y visión suben porque ganás, no al revés. ' +
         'Se muestran como descripción, nunca como fuga. Para poder rankearlas hay que ' +
         'fijar un estado de partida (por ejemplo, solo las partidas parejas al minuto 14).',
+    );
+  }
+  const flags = comparisons.filter((c) => c.distribution !== 'magnitude');
+  if (flags.length > 0) {
+    notes.push(
+      `${flags.length} métrica(s) son banderas 0/1, no magnitudes (${flags
+        .map((c) => c.label)
+        .join(', ')}): se informa la TASA con la que se prenden, sin percentil y sin tamaño ` +
+        'de efecto. Un percentil sobre una bandera dice cuántas veces la prendés, nunca por ' +
+        'cuánto, y así se publicó una vez un "percentil 97" que era una moneda (G-009).',
+    );
+  }
+  if (demotedKeys.length > 0) {
+    notes.push(
+      `OJO: ${demotedKeys.join(', ')} está declarada como magnitud y en esta muestra sólo ` +
+        'toma valores 0 y 1. La traté como bandera y la saqué del ranking; si la muestra ' +
+        'crece y sigue binaria, corregí la declaración en metrics.ts.',
     );
   }
   notes.push(
@@ -324,10 +387,21 @@ export function formatComparison(c: MetricComparison): string {
     ? ` · vs rival de línea: ganás ${c.headToHead.wins} de ${c.headToHead.games - c.headToHead.ties} decididas` +
       (c.headToHead.ties > 0 ? ` (${c.headToHead.ties} empatadas)` : '')
     : '';
+  // A flag gets a different sentence, not the same sentence with two fields blanked out. Its
+  // mean IS a rate, so it is printed as one, and the percentile and the effect size that gave
+  // G-009 its name simply do not appear (there is nothing to put in their place).
+  if (c.distribution !== 'magnitude') {
+    const rate = (v: number) => `${round(v * 100, 0)}%`;
+    return (
+      `${arrow} ${c.label} [bandera 0/1]: la prendés en ${rate(c.yours)} de tus partidas ` +
+      `vs ${rate(c.peerMean)} la referencia (n=${c.games}/${c.peers})${h2h}`
+    );
+  }
   // Never print "NaN": say the effect size is undefined and why.
-  const effect = Number.isFinite(c.effect)
-    ? `efecto ${c.effect}`
-    : 'efecto n/d (sin dispersión en la muestra)';
+  const effect =
+    c.effect !== null && Number.isFinite(c.effect)
+      ? `efecto ${c.effect}`
+      : 'efecto n/d (sin dispersión en la muestra)';
   return (
     `${arrow} ${c.label}: ${pct(c.yours)} vs ${pct(c.peerMean)} de referencia ` +
     `(percentil ${c.percentile}, ${effect}, n=${c.games}/${c.peers})${h2h}`

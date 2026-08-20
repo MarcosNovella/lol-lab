@@ -245,6 +245,76 @@ Pedido suyo: que se entienda de un vistazo. ADR-021.
 
 verify verde, 289 tests. Visto en el navegador, no supuesto.
 
+## S9 2026-08-20, CLOUD — la auditoría, y las siete cosas que encontró
+
+Sesión de revisión pedida en esos términos: "chequeá que todo lo que tenemos está bien y
+funcional y realmente sirve, y cuestionate todo". Todo corrido de verdad, incluida una caché
+SINTÉTICA de 45 partidas con timelines para ejercitar el motor de punta a punta, que es lo que
+una sesión de nube no podía hacer hasta ahora.
+
+**Lo que estaba bien y se verificó, no se supuso:** `pnpm verify` verde (289 tests al empezar),
+las 14 tools registradas, los 11 comandos de la CLI sin crashear en caché vacía, las 9 rutas del
+panel respondiendo, la memoización (`/api/graficos` 46 ms → 2 ms), el guard de token y origen, el
+traversal de `/img/` cerrado, `lol items` bajando 241 ítems de Data Dragon EN VIVO. Y la
+afirmación más cara de S8b: busqué el shape real de una key (`RGAPI-[0-9a-f]{8}-`) en **todos**
+los commits del repo — limpio. La key nunca llegó a git.
+
+**El patrón de los siete hallazgos: una lección que quedó escrita en `.agent/` y nunca se volvió
+código.** Cuatro de los siete son eso exactamente, y este repo se define por lo contrario.
+
+- **A · G-009 era una regla y no un gate.** `early_lane_adv` y `lane_adv` leen los dos campos
+  `challenges` que el propio G-009 documenta como banderas 0/1 e idénticas entre sí; los dos
+  seguían `causal`, y `rankable = contamination === 'causal'`, así que el benchmark les calculaba
+  Cohen's d y percentil y podían encabezar el reporte. El mismo flag pesaba dos veces. Cerrado con
+  `Metric.distribution` (ADR-022) + `looksBinary`, que RE-CHEQUEA la declaración contra la muestra:
+  en la primera corrida degradó una tercera métrica que nadie había marcado. G-029, G-030.
+- **B · `lol growth` afirmaba progreso sobre dos curvas planas.** Con las dos derivas en cero
+  todas las comparaciones dan falso y el control caía al `else`, que lee `net >= 0`: "tu línea se
+  movió MÁS que la de los rivales (neto +0.000)". G-012 en un segundo lugar. `growthVerdict` es
+  ahora puro, testeado, y rechaza el caso degenerado en su primera rama. G-032.
+- **C · `verdictFor` traducía "no medible" a `no_effect`,** con un test que lo fijaba.
+  `conversionGapBinary` devuelve NaN con n GRANDE cuando un bucket queda vacío, así que una
+  muestra de un solo lado se publicaba como "no hay efecto". `unmeasurable` es ahora su propio
+  veredicto, con `verdictLabel` para que las tres front-ends no lo traduzcan distinto. G-033.
+- **D · Los priors de op.gg desaparecían en silencio.** Probado con archivos: CRLF → 0 priors,
+  columna renombrada → 0 priors, archivo ausente → 0 priors, los tres indistinguibles y el
+  tercero documentado como normal. El costo no era el meta faltante: `confidenceOf` pasaba a
+  decir `mayormente_propio`, una etiqueta de confianza EQUIVOCADA. Y el CSV lo escribe un script
+  Python en Windows, que es la máquina de G-010. `readPriors` + `PriorsProblem`. G-031.
+  Verificado en vivo: con el CSV CRLF el prep pasó de "tu registro manda (100%)" a "(60%)".
+- **E · `collectStates.skipped` se calculaba y no lo leía nadie,** bajo un comentario que promete
+  que nunca se descartan en silencio. `Measurement.unreadable` lo lleva hasta la evaluación, y
+  `hip`/`cerrar` lo dicen. No se persiste: describe la caché de hoy, no la evaluación.
+- **F · El backfill de timelines era MCP-only.** Ahora `lol backfill`, segunda fase del botón de
+  sincronizar del panel, y un contador `sin timeline` en cada tarjeta de cuenta más una acción en
+  "qué hacer ahora". G-035.
+- **G · El panel no podía arrancar solo.** Resolver una cuenta existía únicamente como tool de
+  MCP, así que un clon nuevo abría el panel y recibía cinco 404 `no conozco la cuenta 'smurf'` sin
+  nada que hacer. `lol cuenta`, `POST /api/cuenta`, y el panel esconde las secciones de lectura y
+  muestra un formulario mientras no haya cuentas. ADR-023.
+
+**Un bug nuevo, cometido y atrapado durante la sesión:** un backtick dentro de un comentario
+JSDoc adentro de `CLIENT_SCRIPT` terminó el template literal 300 líneas antes. El test de G-022 lo
+agarró sólo porque lo que se derramó resultó ser TypeScript inválido — podría haber parseado y no
+significar nada. G-034 prohíbe el byte y lo chequea por test.
+
+verify verde, **319 tests** (289 → 319). Nada de esto se tocó en su máquina: la caché sintética
+vive en `data/`, que es gitignoreado, y se borró al terminar.
+
+### Lo que quedó afuera a propósito
+
+- Los ~103 `useLiteralKeys` de Biome y el `$schema` pineado en 2.5.1 contra el 2.5.8 instalado.
+  105 renglones de ruido esperado en cada `verify` entrenan a saltear el que sí importa (G-026 al
+  revés), pero es un diff cosmético y no se pidió.
+- `engines: >=24` contra un piso real de 22.18 — `preflight()` avisa abajo de 22 y la suite entera
+  pasa en 22.22. `pnpm install` tira "Unsupported engine" en cada instalación.
+- Ocho constructores de timeline duplicados en tests, porque `fixtures.ts` tiene builders de match
+  y ninguno de timeline.
+- Menores: `queryParticipants` acepta `role: string` y devuelve 0 filas en silencio ante un rol
+  desconocido (lo pisa `Role` en la capa de análisis, pero el store no); "presente en 0/0 peleas";
+  `catalogForPatch` ordena versiones como texto, así que `.9` gana sobre `.10` dentro de un mismo
+  parche.
+
 ## Open questions
 - **Diana**: closed by D3 as "the ledger decides", with the caveat that at n=5 needing 25, and 8
   games since he last played her, it may never reach n.

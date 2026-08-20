@@ -106,8 +106,17 @@ describe('benchmark ranking obeys the contamination class', () => {
       stratum: 'pareja al minuto 14',
     });
 
-    expect(result.comparisons.every((c) => c.rankable)).toBe(true);
+    // Every MAGNITUDE, and only those. A stratum answers G-008 — "is this number downstream of
+    // winning" — and says nothing about G-009 — "does this number have a size at all". A causal
+    // 0/1 flag clears the first gate and fails the second, which is the case that shipped once.
+    const magnitudes = result.comparisons.filter((c) => c.distribution === 'magnitude');
+    expect(magnitudes.length).toBeGreaterThan(0);
+    expect(magnitudes.every((c) => c.rankable)).toBe(true);
     expect(result.notes.join(' ')).toContain('Estrato fijo');
+
+    const flags = result.comparisons.filter((c) => c.distribution === 'flag');
+    expect(flags.length).toBeGreaterThan(0);
+    expect(flags.every((c) => c.rankable)).toBe(false);
   });
 });
 

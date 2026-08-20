@@ -76,7 +76,16 @@ acordarse, no observar — el software anota cuánto tardaste, así que no se me
 
 Si preferís la terminal, `pnpm lol cerrar` hace el mismo ritual con una tecla por partida
 (`y` la produje yo · `i` salía igual · `p` estuvo pareja). `pnpm lol` solo lista todo lo demás:
-`report`, `prep`, `cobertura`, `growth`, `page`, `hip`, `rank`, `items`.
+`cuenta`, `report`, `prep`, `cobertura`, `growth`, `page`, `hip`, `rank`, `items`, `backfill`.
+
+`pnpm lol cuenta <Nombre#TAG> [etiqueta]` es el primer paso de todo: resuelve el Riot ID y lo
+guarda con el nombre corto que después usa el resto (`lol report smurf`).
+
+`pnpm lol backfill` baja los timelines que falten de partidas que ya están en la caché. Hace
+falta porque `riot_sync` sólo pide el timeline de las partidas que está bajando en ese momento:
+una partida que entró sin él se queda sin él para siempre, y **sin timeline no hay minuto** — ni
+estado de línea, ni conversión, ni momentos caros, ni ítems, ni mapa de muertes. El panel lo
+corre solo como segunda fase del botón de sincronizar, y te dice cuántas quedan.
 
 `pnpm lol items` es de una sola vez por parche: baja la tabla de ítems de Data Dragon (sin key,
 sin rate limit, un catálogo por parche que hayas jugado) y con eso el reporte y el panel pueden
@@ -97,6 +106,7 @@ un solo request.
 | `riot_key_status` | Si hay key, qué tipo es y hace cuánto se pegó. Nunca muestra el valor. Primer diagnóstico cuando algo falla. |
 | `riot_resolve_account` | Riot ID → puuid, nivel y rango por cola. Guarda la cuenta para referirte a ella después por nombre o etiqueta. |
 | `riot_sync` | Baja partidas a la caché. Idempotente: lo que ya está no se vuelve a pedir. |
+| `riot_backfill_timelines` | Baja los timelines de partidas que YA están en la caché. Sin timeline una partida no tiene datos por minuto y queda fuera de casi todo. Desde la terminal es `lol backfill`, y el panel lo hace solo al sincronizar. |
 | `riot_matches` | Lista lo que hay en la caché, con filtros. No pega a la API. |
 | `riot_benchmark` | **La importante.** Tus métricas contra los otros jugadores de tus propias partidas, de peor a mejor. |
 | `riot_match_detail` | Una partida completa; con timeline, las diferencias de oro/CS/XP a los 10, 15 y 20. |
@@ -108,13 +118,18 @@ un solo request.
 | `lol_tag` | Taguear una partida suelta, para la noche que no corriste `lol cerrar`. |
 | `lol_rank` | Dónde está cada cuenta y qué se movió desde que arrancó el reloj. |
 
-Flujo típico la primera vez:
+Flujo típico la primera vez, conversando:
 
 ```
 riot_resolve_account  gameName=legendoftorcuato tagLine=las label=smurf
 riot_sync             account=smurf queue=soloq max=100
 riot_benchmark        account=smurf role=mid
 ```
+
+Nada de esto es obligatorio para arrancar: **el panel y la terminal registran una cuenta solos**
+(`lol cuenta LegendofTorcuato#LAS smurf`, o el formulario que aparece en el panel cuando la caché
+está vacía). Antes el primer paso sólo existía como tool de MCP, así que un clon nuevo abría el
+panel y no tenía por dónde empezar.
 
 ## Cómo se arma el benchmark
 
@@ -128,6 +143,18 @@ tocaron, no una muestra aleatoria de la división.
 
 Se reporta tamaño de efecto y n, nunca p-values. Cuando la muestra es chica, lo dice en vez
 de mostrar un número que parece confiable.
+
+Dos puertas antes de que una métrica pueda encabezar el reporte, y hay que pasar las dos:
+
+- **¿el número está contaminado por el resultado?** El que farmea más porque va ganando no te
+  dice nada sobre por qué gana. Una métrica contaminada se muestra como descripción y no se
+  rankea, salvo que fijes un estado de partida.
+- **¿el número tiene tamaño?** Varios campos `challenges` de Riot son banderas 0/1 disfrazadas
+  de magnitud. Un percentil sobre una bandera dice cuántas veces la prendés y nunca por cuánto
+  — así se publicó una vez un "percentil 97 en ventaja de oro+XP" que era una moneda. Las
+  banderas se informan como TASA, sin percentil y sin tamaño de efecto. Y la declaración se
+  vuelve a chequear contra la muestra: una métrica declarada magnitud que en tus datos sólo
+  toma 0 y 1 se degrada sola y te lo dice.
 
 ## Cuánto tarda un backfill
 

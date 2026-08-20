@@ -3,6 +3,7 @@ import {
   evaluationsOf,
   listHypotheses,
   type Spec,
+  verdictLabel,
 } from '../analysis/hypotheses.ts';
 import { standardMeasure } from '../analysis/measures.ts';
 import { openDb } from '../store/db.ts';
@@ -76,8 +77,17 @@ export function run(argv: string[]): void {
           ? evaluation.effect.toFixed(3)
           : 'todavía no medible';
         out(`  fuera de muestra: n=${evaluation.n}, efecto ${effect}`);
+        // The number that used to be computed and thrown away. A game with no timeline has no
+        // lane state, so it is not in `n` and not anywhere else either — and the fix is one
+        // command, which is why the line names it.
+        if (evaluation.unreadable > 0) {
+          out(
+            `  ${evaluation.unreadable} partida(s) de la ventana quedaron sin leer por falta de ` +
+              'timeline — corré `lol backfill` y volvé a evaluar.',
+          );
+        }
         out(
-          `  veredicto: ${evaluation.verdict}` +
+          `  veredicto: ${evaluation.verdict} (${verdictLabel(evaluation.verdict)})` +
             `${shortfall > 0 ? ` — faltan ${shortfall} partidas` : ''}`,
         );
         const history = evaluationsOf(db, h.id);
@@ -88,7 +98,7 @@ export function run(argv: string[]): void {
         out(
           last === undefined
             ? '  sin evaluar todavía'
-            : `  última evaluación: ${last.verdict}, n=${last.n}`,
+            : `  última evaluación: ${last.verdict} (${verdictLabel(last.verdict)}), n=${last.n}`,
         );
       }
       out();

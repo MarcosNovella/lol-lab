@@ -1,6 +1,6 @@
 import { coverageOf, coverageTotals } from '../analysis/coverage.ts';
 import { collectMatchups } from '../analysis/matchups.ts';
-import { loadPriors, priorsKeyedLike, priorsPath } from '../analysis/priors.ts';
+import { describePriorsProblem, priorsKeyedLike, readPriors } from '../analysis/priors.ts';
 import { openDb } from '../store/db.ts';
 import { account, labelOf, out } from './shared.ts';
 
@@ -20,8 +20,9 @@ export function run(argv: string[]): void {
     const limit = Number(argv[1] ?? 15);
 
     const rows = collectMatchups(db);
+    const read = readPriors();
     const priors = priorsKeyedLike(
-      loadPriors(),
+      read.priors,
       rows.map((r) => ({ champion: r.champion, opponent: r.opponent })),
     );
     const coverage = coverageOf(rows, { account: label, priors });
@@ -33,8 +34,14 @@ export function run(argv: string[]): void {
         `${coverage.scope.since === null ? 'toda la historia en caché' : `desde ${new Date(coverage.scope.since).toISOString().slice(0, 10)}`} · ` +
         `remakes ${coverage.scope.remakes}`,
     );
-    if (priors.length === 0) {
-      out(`  sin priors de op.gg (${priorsPath()} no está) — todo se apoya en tu propio registro`);
+    // Says WHICH of the three it was. "No file" is normal and reads as an aside; "the file is
+    // there and I could not parse it" is a problem and reads as one. They used to be the same
+    // sentence, which is how a CRLF CSV would have passed for a machine without a vault.
+    const problem = describePriorsProblem(read.problem);
+    if (problem !== null) out(`  ${problem}`);
+    else if (priors.length === 0) {
+      out('  los priors de op.gg cargaron pero ninguno cruza con tus matchups — revisá que el');
+      out('  CSV sea del mismo parche y los mismos campeones que tenés en caché (G-016).');
     }
     out(
       `  ${totals.matchups} matchups vistos · ${totals.reps} reps en total (todas las cuentas) · ` +

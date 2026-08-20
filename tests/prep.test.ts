@@ -1,3 +1,6 @@
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   breakdown,
@@ -13,6 +16,7 @@ import {
   prepMatchup,
   SHRINKAGE_DEFAULT,
 } from '../src/analysis/prep.ts';
+import { describePriorsProblem, readPriors } from '../src/analysis/priors.ts';
 
 function row(over: Partial<MatchupRow> & { account: string }): MatchupRow {
   return {
@@ -190,5 +194,70 @@ describe('shrinkage toward the meta prior', () => {
     expect(confidenceOf(prep)).toBe('solo_meta');
     expect(prep.estimates.every((e) => e.winRate === PRIOR.winRate)).toBe(true);
     expect(prep.ownWeight).toBe(0);
+  });
+});
+
+/**
+ * The op.gg CSV reader.
+ *
+ * Every case here was found by feeding the parser a file, not by reading it: all three failure
+ * modes returned `[]` and were indistinguishable from "this machine has no vault", which the
+ * module documents as normal. The cost is not a missing feature — `confidenceOf` goes on to
+ * report `mayormente_propio`, a WRONG confidence label on an estimate that silently lost its
+ * prior.
+ */
+describe('leer los priors de op.gg', () => {
+  const HEAD = 'champion,lane_opponent,wr_pct,muestra_partidas';
+  const ROWS = 'Diana,Yone,52.4,18342\nAhri,Zed,48.1,9001';
+
+  function write(name: string, body: string): string {
+    const path = join(tmpdir(), `priors-${name}-${process.pid}-${Math.random()}.csv`);
+    writeFileSync(path, body);
+    return path;
+  }
+
+  it('reads a plain LF file', () => {
+    const read = readPriors(write('lf', `${HEAD}\n${ROWS}\n`));
+    expect(read.problem.kind).toBe('ok');
+    expect(read.priors).toHaveLength(2);
+    expect(read.priors[0]?.winRate).toBeCloseTo(0.524);
+    expect(read.priors[0]?.sampleGames).toBe(18342);
+  });
+
+  it('reads a CRLF file, which used to come back empty and silent (G-010)', () => {
+    // `split('\n')` left a `\r` on the last header name, so `indexOf('muestra_partidas')` was
+    // -1 and every row was skipped. The file is written by a Python script on Windows.
+    const read = readPriors(write('crlf', `${HEAD}\r\n${ROWS.replace(/\n/g, '\r\n')}\r\n`));
+    expect(read.problem.kind).toBe('ok');
+    expect(read.priors).toHaveLength(2);
+    expect(read.priors[0]?.champion).toBe('Diana');
+    expect(read.priors[1]?.opponent).toBe('Zed');
+  });
+
+  it('names the missing column instead of returning nothing', () => {
+    const read = readPriors(
+      write('cols', 'champion,lane_opponent,winrate,games\nDiana,Yone,52.4,1'),
+    );
+    expect(read.problem.kind).toBe('columnas');
+    expect(read.priors).toHaveLength(0);
+    const described = describePriorsProblem(read.problem) ?? '';
+    expect(described).toContain('wr_pct');
+    expect(described).toContain('muestra_partidas');
+    // It also has to say what it DID find, or the fix is a guessing game.
+    expect(described).toContain('winrate');
+  });
+
+  it('tells an absent file apart from an unreadable one', () => {
+    const absent = readPriors(join(tmpdir(), 'no-existe-jamas-de-los-jamases.csv'));
+    expect(absent.problem.kind).toBe('ausente');
+    // Absent is NORMAL — a cloud session has no vault — so it reads as an aside, not an alarm.
+    expect(describePriorsProblem(absent.problem)).toContain('todo se apoya en tu propio registro');
+    expect(describePriorsProblem({ kind: 'ok' })).toBeNull();
+  });
+
+  it('ignores blank lines and trims stray spaces rather than dropping the row', () => {
+    const read = readPriors(write('blank', `${HEAD}\n${ROWS}\n\n`));
+    expect(read.problem.kind).toBe('ok');
+    expect(read.priors).toHaveLength(2);
   });
 });

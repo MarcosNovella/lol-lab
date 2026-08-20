@@ -25,6 +25,7 @@ import {
   pendientes,
   prep,
   RouteError,
+  registrarCuenta,
   type SyncEvento,
   sincronizar,
   syncEnCurso,
@@ -294,6 +295,63 @@ describe('el sync', () => {
     return { fetched: 2, timelines: 2, remakes: 0, errors: [] };
   };
 
+  /**
+   * The second phase of the button.
+   *
+   * `syncMatches` only fetches a timeline for a match it is downloading right now, so a game
+   * cached without one stays without one however many syncs run afterwards — and the repair
+   * lived only behind an MCP tool, unreachable from the panel that suffers most from the hole.
+   */
+  it('repairs the timelines of games already cached, after downloading the new ones', async () => {
+    const eventos: SyncEvento[] = [];
+    const orden: string[] = [];
+    await sincronizar(db, 'smurf', (e) => eventos.push(e), {
+      sync: async (puuid, onProgress) => {
+        orden.push('partidas');
+        return okSync(puuid, onProgress);
+      },
+      reparar: async (_puuid, onProgress) => {
+        orden.push('timelines');
+        onProgress(1, 1);
+        return { fetched: 1, errors: [] };
+      },
+    });
+
+    // New games FIRST: a rate limit that cuts the run short must cost the repair of old
+    // history, never the download of tonight's games.
+    expect(orden).toEqual(['partidas', 'timelines']);
+
+    const fases = eventos.flatMap((e) => (e.tipo === 'progreso' ? [e.fase] : []));
+    expect(fases).toEqual(['partidas', 'partidas', 'timelines']);
+
+    const fin = eventos.at(-1);
+    expect(fin?.tipo).toBe('fin');
+    if (fin?.tipo === 'fin') {
+      expect(fin.reparados).toBe(1);
+      expect(fin.bajadas).toBe(2);
+    }
+  });
+
+  it('still finishes when no repair step is supplied, reporting zero rather than nothing', async () => {
+    const eventos: SyncEvento[] = [];
+    await sincronizar(db, 'smurf', (e) => eventos.push(e), { sync: okSync });
+    const fin = eventos.at(-1);
+    if (fin?.tipo === 'fin') expect(fin.reparados).toBe(0);
+  });
+
+  it('does not let a failed repair turn a good sync into a failed one', async () => {
+    const eventos: SyncEvento[] = [];
+    await sincronizar(db, 'smurf', (e) => eventos.push(e), {
+      sync: okSync,
+      // The repair reports its errors rather than throwing, same contract as the rank clock:
+      // tonight's games are already on disk and must not be reported as lost.
+      reparar: async () => ({ fetched: 0, errors: ['LA2_9: 403'] }),
+    });
+    const fin = eventos.at(-1);
+    expect(fin?.tipo).toBe('fin');
+    if (fin?.tipo === 'fin') expect(fin.errores).toContain('LA2_9: 403');
+  });
+
   it('streams start, progress and finish, in that order', async () => {
     const eventos: SyncEvento[] = [];
     await sincronizar(db, 'smurf', (e) => eventos.push(e), { sync: okSync });
@@ -361,6 +419,18 @@ describe('la página', () => {
     // written as '\n' came out split across two lines and the whole script was unparseable.
     // Same blind spot G-018 was born from: the verify chain does not look inside strings.
     expect(() => new Function(CLIENT_SCRIPT)).not.toThrow();
+  });
+
+  it('carries no raw backtick, which would end the template it lives in', () => {
+    // The `new Function` check above catches this ONLY when the code that spills out of the
+    // string happens to be invalid TypeScript. It did today — a JSDoc comment inside the script
+    // referred to a route in backticks, the literal ended there, and the rest of the file became
+    // real code. It could as easily have produced something that parses and means nothing.
+    //
+    // So the byte is banned outright, the same way G-018 bans a raw control character: a
+    // backtick that is genuinely wanted inside this script is written as an escape.
+    const BACKTICK = String.fromCharCode(96);
+    expect(CLIENT_SCRIPT).not.toContain(BACKTICK);
   });
 
   it('never inlines data into the shell', () => {
@@ -624,5 +694,63 @@ describe('las imágenes locales', () => {
 
     await new Promise<void>((r) => ui.server.close(() => r()));
     db.close();
+  });
+});
+
+/**
+ * Registering an account from the panel.
+ *
+ * ADR-018 made the panel an EXECUTION surface, and the very first step of the workflow was the
+ * one thing it could not execute: resolving a Riot ID lived only behind the MCP tool, so a
+ * fresh cache produced a page that diagnosed the problem and offered no way to fix it.
+ */
+describe('registrar una cuenta desde el panel', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+  });
+
+  const resolver = async (gameName: string, tagLine: string, label?: string) => ({
+    gameName,
+    tagLine,
+    label: label ?? null,
+  });
+
+  it('splits a Riot ID and keeps the label he chose', async () => {
+    const r = await registrarCuenta(db, { riotId: 'LaMarso#LAS', label: 'main' }, resolver);
+    expect(r).toEqual({ gameName: 'LaMarso', tagLine: 'LAS', label: 'main' });
+  });
+
+  it('splits on the LAST hash, because a game name may contain one', async () => {
+    const r = await registrarCuenta(db, { riotId: 'a#b#LAS', label: null }, resolver);
+    expect(r.gameName).toBe('a#b');
+    expect(r.tagLine).toBe('LAS');
+  });
+
+  it('falls back to the game name rather than storing an empty label', async () => {
+    const r = await registrarCuenta(db, { riotId: 'LaMarso#LAS', label: '' }, resolver);
+    expect(r.label).toBe('LaMarso');
+  });
+
+  it('refuses something that is not a Riot ID, and says what one looks like', async () => {
+    for (const bad of ['LaMarso', '#LAS', 'LaMarso#', '']) {
+      await expect(registrarCuenta(db, { riotId: bad, label: null }, resolver)).rejects.toThrow(
+        RouteError,
+      );
+    }
+    await expect(registrarCuenta(db, { riotId: 'LaMarso', label: null }, resolver)).rejects.toThrow(
+      /Nombre#TAG/,
+    );
+  });
+
+  it('lets the resolver failure through instead of reporting a bad ID', async () => {
+    // The likeliest failure by far is a missing or expired key, and turning that into "your
+    // Riot ID is wrong" would send him to fix the one thing that was fine.
+    await expect(
+      registrarCuenta(db, { riotId: 'LaMarso#LAS', label: null }, async () => {
+        throw new Error('Falta RIOT_API_KEY');
+      }),
+    ).rejects.toThrow(/RIOT_API_KEY/);
   });
 });
