@@ -730,12 +730,8 @@ describe('las imágenes locales', () => {
  * fresh cache produced a page that diagnosed the problem and offered no way to fix it.
  */
 describe('registrar una cuenta desde el panel', () => {
-  let db: Db;
-
-  beforeEach(() => {
-    db = openDb(':memory:');
-  });
-
+  // No database here on purpose: `registrarCuenta` takes none, because the injected resolver is
+  // what writes the account. A handle would be a parameter that only looks load-bearing.
   const resolver = async (gameName: string, tagLine: string, label?: string) => ({
     gameName,
     tagLine,
@@ -743,28 +739,28 @@ describe('registrar una cuenta desde el panel', () => {
   });
 
   it('splits a Riot ID and keeps the label he chose', async () => {
-    const r = await registrarCuenta(db, { riotId: 'LaMarso#LAS', label: 'main' }, resolver);
+    const r = await registrarCuenta({ riotId: 'LaMarso#LAS', label: 'main' }, resolver);
     expect(r).toEqual({ gameName: 'LaMarso', tagLine: 'LAS', label: 'main' });
   });
 
   it('splits on the LAST hash, because a game name may contain one', async () => {
-    const r = await registrarCuenta(db, { riotId: 'a#b#LAS', label: null }, resolver);
+    const r = await registrarCuenta({ riotId: 'a#b#LAS', label: null }, resolver);
     expect(r.gameName).toBe('a#b');
     expect(r.tagLine).toBe('LAS');
   });
 
   it('falls back to the game name rather than storing an empty label', async () => {
-    const r = await registrarCuenta(db, { riotId: 'LaMarso#LAS', label: '' }, resolver);
+    const r = await registrarCuenta({ riotId: 'LaMarso#LAS', label: '' }, resolver);
     expect(r.label).toBe('LaMarso');
   });
 
   it('refuses something that is not a Riot ID, and says what one looks like', async () => {
     for (const bad of ['LaMarso', '#LAS', 'LaMarso#', '']) {
-      await expect(registrarCuenta(db, { riotId: bad, label: null }, resolver)).rejects.toThrow(
+      await expect(registrarCuenta({ riotId: bad, label: null }, resolver)).rejects.toThrow(
         RouteError,
       );
     }
-    await expect(registrarCuenta(db, { riotId: 'LaMarso', label: null }, resolver)).rejects.toThrow(
+    await expect(registrarCuenta({ riotId: 'LaMarso', label: null }, resolver)).rejects.toThrow(
       /Nombre#TAG/,
     );
   });
@@ -773,7 +769,7 @@ describe('registrar una cuenta desde el panel', () => {
     // The likeliest failure by far is a missing or expired key, and turning that into "your
     // Riot ID is wrong" would send him to fix the one thing that was fine.
     await expect(
-      registrarCuenta(db, { riotId: 'LaMarso#LAS', label: null }, async () => {
+      registrarCuenta({ riotId: 'LaMarso#LAS', label: null }, async () => {
         throw new Error('Falta RIOT_API_KEY');
       }),
     ).rejects.toThrow(/RIOT_API_KEY/);

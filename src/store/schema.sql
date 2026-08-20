@@ -246,3 +246,35 @@ CREATE TABLE IF NOT EXISTS items (
   tags       TEXT NOT NULL,
   PRIMARY KEY (item_id, version)
 );
+
+-- Runes and champion classes, cached PER PATCH from Data Dragon, exactly like `items` and for
+-- the same reason (ADR-020): a rune's tree and a champion's class both change between patches,
+-- and reading a 15.x game against the newest table would silently relabel it. A patch with no
+-- catalogue is REPORTED as having none rather than read against another one.
+CREATE TABLE IF NOT EXISTS runes (
+  rune_id   INTEGER NOT NULL,
+  version   TEXT    NOT NULL,
+  key       TEXT    NOT NULL,
+  name      TEXT    NOT NULL,
+  tree_id   INTEGER NOT NULL,
+  tree_key  TEXT    NOT NULL,
+  tree_name TEXT    NOT NULL,
+  -- Slot 0 of a tree holds its keystones and nothing else, which is what makes a keystone
+  -- identifiable without a hardcoded id list that goes stale every preseason.
+  slot      INTEGER NOT NULL,
+  icon      TEXT    NOT NULL,
+  PRIMARY KEY (rune_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS champions (
+  champion_id INTEGER NOT NULL,
+  version     TEXT    NOT NULL,
+  key         TEXT    NOT NULL,
+  name        TEXT    NOT NULL,
+  title       TEXT    NOT NULL,
+  -- Comma-joined: Assassin, Fighter, Mage, Marksman, Support, Tank. A champion has one or two.
+  tags        TEXT    NOT NULL,
+  PRIMARY KEY (champion_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_champions_key ON champions (key);

@@ -165,6 +165,14 @@ td { padding: 5px 8px 5px 0; border-top: 1px solid var(--line-soft); }
 /* The first column takes the slack. Without this a six-column table of short values spreads
    every number to the far edge of the card and the row stops reading as one thing. */
 th:not(:first-child), td:not(:first-child) { width: 1%; white-space: nowrap; }
+/* For a table whose first column is a short label rather than a sentence: full width would
+   push the numbers to the far edge of the card and the row would stop reading as one thing. */
+/* max-content, not auto: an auto-width table inside a block still stretched to the full card,
+   and the numbers ended up against the far edge with a lake of nothing before them. The first
+   cell also needs its own max-content, or the flex box inside it keeps stretching. */
+table.compacta { width: max-content; max-width: 100%; }
+table.compacta td:first-child, table.compacta th:first-child { width: max-content; }
+table.compacta th:first-child, table.compacta td:first-child { padding-right: 28px; }
 .row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
 .row .k { color: var(--dim); }
 .hint { color: var(--faint); font-size: 12px; margin: 0 0 10px; }
@@ -239,6 +247,18 @@ input:focus, select:focus, button:focus-visible, summary:focus-visible {
             background: #0b0d11; }
 .item .min { color: var(--faint); font-size: 11px; }
 .item.tarde img { border-color: var(--warn); }
+/* Keystones and classes. The icon is round because Riot draws them round; a square crop of a
+   circular badge reads as a rendering bug. */
+.runa { display: flex; align-items: center; gap: 8px; }
+.runa img { width: 28px; height: 28px; border-radius: 50%; background: #0b0d11; flex: none; }
+.runa.chica img { width: 20px; height: 20px; }
+.duelo-runas { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+.clase { font-size: 11px; color: var(--dim); border: 1px solid var(--line); border-radius: 999px;
+         padding: 1px 8px; }
+/* A bar inside a table cell: the row already carries the number, so the bar is only there to
+   make the column scannable. Same hue for every row — this is magnitude, not identity. */
+.barrita { display: inline-block; height: 8px; border-radius: 2px; background: #3d5384;
+           vertical-align: middle; min-width: 2px; }
 .tag { font-size: 11px; color: var(--dim); border: 1px solid var(--line);
        border-radius: 5px; padding: 1px 6px; }
 .tags { display: flex; gap: 6px; }
@@ -247,6 +267,16 @@ input:focus, select:focus, button:focus-visible, summary:focus-visible {
 .partida .cuando { color: var(--faint); font-size: 12px; }
 .svgbox { overflow-x: auto; }
 .filtros { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+
+/* ------------------------------------------------------------------- tooltip
+   A chart in a browser IS interactive, and the native <svg><title> is not that: it waits most
+   of a second and it cannot be styled. This one follows the pointer and shows every dimension
+   the point carries, not just the one the line is drawn from. */
+.tip { position: fixed; z-index: 90; pointer-events: none;
+       background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-sm);
+       padding: 7px 10px; font-size: 12px; font-variant-numeric: tabular-nums;
+       box-shadow: 0 6px 20px rgba(0,0,0,.5); white-space: nowrap; }
+.tip .m { color: var(--faint); }
 
 /* ------------------------------------------------------------------------ avisos
    A stack of toasts instead of one shared error line: five sections failing used to write
@@ -687,6 +717,7 @@ async function renderResumen(box) {
     sum.textContent = 'ver por campeón (' + r.porCampeon.length + ')';
     det.append(sum);
     const tabla = document.createElement('table');
+    tabla.className = 'compacta';
     const head = document.createElement('tr');
     for (const h of ['campeón', 'partidas', 'ganadas', 'cs@10', 'rival', 'dif']) {
       const th = document.createElement('th');
@@ -881,6 +912,19 @@ function filaPartida(p) {
   return det;
 }
 
+/* A keystone, or nothing. The name is always in the text beside it, so a missing icon degrades
+   to plain text rather than to a broken-image box — same contract as the champion portraits. */
+const runaIcono = (k, chica) => {
+  const caja = el('div', 'runa' + (chica ? ' chica' : ''));
+  const img = document.createElement('img');
+  img.src = '/img/rune/' + k.runeId + '.png';
+  img.alt = k.name;
+  img.loading = 'lazy';
+  img.onerror = () => img.remove();
+  caja.append(img, el('span', null, k.name));
+  return caja;
+};
+
 function bloque(padre, titulo) {
   const b = el('div', 'bloque');
   b.append(el('div', 't', titulo));
@@ -889,6 +933,32 @@ function bloque(padre, titulo) {
 }
 
 function pintarDetalle(box, d) {
+  // Runes and classes come from the match payload itself, so they show even for a game with no
+  // timeline — which is why this block sits above the early return.
+  if ((d.runas && (d.runas.mia || d.runas.suya)) || d.clasesRival.length > 0) {
+    const b = bloque(box, 'runas y clase del rival');
+    if (d.runas && (d.runas.mia || d.runas.suya)) {
+      const fila = el('div', 'duelo-runas');
+      if (d.runas.mia) {
+        const m = el('div', 'runa');
+        m.append(el('span', 'faint', 'vos'), runaIcono(d.runas.mia, false));
+        fila.append(m);
+      }
+      if (d.runas.suya) {
+        const t = el('div', 'runa');
+        t.append(el('span', 'faint', 'rival'), runaIcono(d.runas.suya, false));
+        fila.append(t);
+      }
+      b.append(fila);
+    }
+    if (d.clasesRival.length > 0) {
+      const clases = el('div');
+      clases.style.marginTop = '6px';
+      for (const c of d.clasesRival) clases.append(el('span', 'clase', c));
+      b.append(clases);
+    }
+  }
+
   if (d.derivado === null) {
     const b = bloque(box, 'sin timeline');
     b.append(el('div', 'dim',
@@ -1281,6 +1351,7 @@ async function renderGraficos(box) {
     holder.innerHTML = g.curva;
     card.append(holder);
     box.append(card);
+    engancharTooltip(holder);
   }
   const card = el('div', 'card plano');
   card.append(el('div', 't', 'dónde morís'));
@@ -1291,6 +1362,51 @@ async function renderGraficos(box) {
   holder.innerHTML = g.mapa;
   card.append(holder);
   box.append(card);
+}
+
+/**
+ * The hover layer for the gold curve.
+ *
+ * Attached after the SVG lands in the document rather than built into it, because the builder is
+ * shared with the static page (ADR-014) and that one has no JavaScript at all — so the markup
+ * stays inert and the panel adds behaviour on top. The svg title inside each dot is the floor
+ * that survives with this turned off.
+ */
+function engancharTooltip(caja) {
+  const tip = el('div', 'tip');
+  tip.hidden = true;
+  document.body.append(tip);
+  let vivo = null;
+
+  const mostrar = (hit, evento) => {
+    const oro = Number(hit.dataset.oro);
+    const cs = Number(hit.dataset.cs);
+    const xp = Number(hit.dataset.xp);
+    const firma = (n, sufijo) => (n > 0 ? '+' : '') + n + (sufijo || '');
+    tip.replaceChildren();
+    tip.append(el('div', null, hit.dataset.minuto + ' minutos'));
+    const linea = el('div');
+    linea.append(el('span', oro >= 0 ? 'ok' : 'bad', firma(oro) + ' de oro'));
+    linea.append(el('span', 'm', '   ' + firma(cs) + ' cs   ' + firma(xp) + ' xp'));
+    tip.append(linea);
+    tip.hidden = false;
+    // Offset so the cursor never sits on top of the thing it is pointing at, and flipped near
+    // the right edge so the tooltip does not push the page sideways.
+    const ancho = tip.offsetWidth;
+    const x = evento.clientX + 14 + ancho > window.innerWidth
+      ? evento.clientX - 14 - ancho : evento.clientX + 14;
+    tip.style.left = x + 'px';
+    tip.style.top = (evento.clientY + 16) + 'px';
+  };
+
+  for (const hit of caja.querySelectorAll('circle.hit')) {
+    hit.addEventListener('pointerenter', (e) => { vivo = hit; mostrar(hit, e); });
+    hit.addEventListener('pointermove', (e) => { if (vivo === hit) mostrar(hit, e); });
+    hit.addEventListener('pointerleave', () => { vivo = null; tip.hidden = true; });
+  }
+  // The tooltip is fixed-position and the section it belongs to can be collapsed out from under
+  // it, which would leave it floating over an unrelated part of the page.
+  caja.closest('details').addEventListener('toggle', () => { tip.hidden = true; });
 }
 
 /* -------------------------------------------------------------------- cobertura */
@@ -1372,6 +1488,127 @@ async function renderLedger(box) {
       (h.ultima ? ' · última: ' + h.ultima.lectura + ' (n=' + h.ultima.n + ')' : ' · sin evaluar')));
     card.append(el('div', 'alcance', 'cautela: ' + h.cautela));
     box.append(card);
+  }
+}
+
+/* ------------------------------------------------------------------ runas y clases
+   Two dimensions that were already in the cache and had nothing reading them: the keystones
+   have been in every match payload since the first sync, and the classes are one Data Dragon
+   table. Neither costs a Riot request. */
+
+/** A small bar so a column of counts is scannable. Same hue for every row: this is magnitude,
+    not identity, and a colour per row would invite reading the hue as a category. */
+function celdaBarra(valor, maximo) {
+  const td = document.createElement('td');
+  const barra = el('span', 'barrita');
+  barra.style.width = Math.max(2, Math.round((valor / Math.max(1, maximo)) * 90)) + 'px';
+  td.append(barra, document.createTextNode(' ' + valor));
+  td.className = 'nums';
+  return td;
+}
+
+function tablaKeystones(titulo, filas, nota) {
+  const caja = el('div');
+  caja.append(el('h3', null, titulo));
+  if (filas.length === 0) {
+    caja.append(el('div', 'vacio', 'Ninguna leída todavía.'));
+    return caja;
+  }
+  const maximo = Math.max(...filas.map((f) => f.jugadas));
+  const tabla = document.createElement('table');
+  tabla.className = 'compacta';
+  const head = document.createElement('tr');
+  for (const h of ['keystone', 'árbol', 'partidas', 'ganadas', 'wr']) {
+    const th = document.createElement('th');
+    th.textContent = h;
+    head.append(th);
+  }
+  tabla.append(head);
+  for (const f of filas) {
+    const tr = document.createElement('tr');
+    const td0 = document.createElement('td');
+    td0.append(runaIcono({ runeId: f.runeId, name: f.name }, true));
+    tr.append(td0);
+    const td1 = document.createElement('td');
+    td1.textContent = f.treeName;
+    td1.className = 'dim';
+    tr.append(td1, celdaBarra(f.jugadas, maximo));
+    for (const valor of [f.ganadas + '/' + f.jugadas,
+                         Number.isFinite(f.winRate) ? Math.round(f.winRate * 100) + '%' : '—']) {
+      const td = document.createElement('td');
+      td.textContent = valor;
+      td.className = 'nums';
+      tr.append(td);
+    }
+    tabla.append(tr);
+  }
+  caja.append(tabla);
+  if (nota) caja.append(el('div', 'alcance', nota));
+  return caja;
+}
+
+async function renderRunas(box) {
+  const r = await api('/api/runas');
+
+  if (r.faltaCatalogo) {
+    box.append(el('div', 'card plano',
+      'Falta la tabla de runas del parche ' + r.faltaCatalogo + '. Corré lol catalogos: ' +
+      'no gasta ni un request de Riot, sale de Data Dragon.'));
+  }
+
+  box.append(el('div', 'hint',
+    'Las runas estaban guardadas en cada partida desde el primer sync y nada las leía. ' +
+    'Esto no bajó nada de Riot: sólo una tabla por parche que dice qué significa cada id.'));
+
+  box.append(tablaKeystones('las que llevás vos', r.mias,
+    'DESCRIPCIÓN, no ranking. No elegís keystone al azar: la elegís por el matchup y por el ' +
+    'campeón, así que su winrate se lleva puestas todas las razones por las que la elegiste. ' +
+    'La columna de partidas está para que eso se lea solo.'));
+
+  box.append(tablaKeystones('las que te tocaron enfrente', r.suyas,
+    'Winrate TUYO en las partidas donde el rival llevó esa keystone — no el de él.'));
+
+  if (r.clases.length > 0) {
+    box.append(el('h3', null, 'contra qué clase de campeón'));
+    const maximo = Math.max(...r.clases.map((c) => c.jugadas));
+    const tabla = document.createElement('table');
+    tabla.className = 'compacta';
+    const head = document.createElement('tr');
+    for (const h of ['clase', 'partidas', 'ganadas', 'wr']) {
+      const th = document.createElement('th');
+      th.textContent = h;
+      head.append(th);
+    }
+    tabla.append(head);
+    for (const c of r.clases) {
+      const tr = document.createElement('tr');
+      const td0 = document.createElement('td');
+      td0.textContent = c.etiqueta;
+      tr.append(td0, celdaBarra(c.jugadas, maximo));
+      for (const valor of [c.ganadas + '/' + c.jugadas,
+                           Number.isFinite(c.winRate) ? Math.round(c.winRate * 100) + '%' : '—']) {
+        const td = document.createElement('td');
+        td.textContent = valor;
+        td.className = 'nums';
+        tr.append(td);
+      }
+      tabla.append(tr);
+    }
+    box.append(tabla);
+    // Said out loud because a reader who adds the column and gets more than the game count
+    // would be right to distrust the whole table.
+    box.append(el('div', 'alcance',
+      'La clase es lo único que se sabe ANTES de que empiece la partida, así que es el único ' +
+      'agrupamiento de rivales que no se contamina con el resultado. Un campeón puede tener ' +
+      'DOS clases (Diana es luchadora y asesina), así que las filas no suman ' + r.jugadas +
+      '. Está toda la tabla a propósito: una fila sola no dice nada sin las otras.'));
+  }
+
+  const perdidas = r.sinLeer.mias + r.sinLeer.suyas;
+  if (perdidas > 0 || r.sinClasificar > 0) {
+    box.append(el('div', 'alcance',
+      'Sin leer: ' + r.sinLeer.mias + ' keystone(s) tuyas, ' + r.sinLeer.suyas + ' del rival, ' +
+      r.sinClasificar + ' partida(s) sin clase de rival identificada.'));
   }
 }
 
@@ -1624,6 +1861,8 @@ function armarSecciones() {
     ['partidas', 'Partidas', renderPartidas, false, () => ({ badge: '', texto: 'buscar y filtrar' })],
     ['momentos', 'Lo que salió caro', renderMomentos, false, () => ({ badge: '', texto: 'últimas 5' })],
     ['graficos', 'Curva y mapa de muertes', renderGraficos, false, () => null],
+    ['runas', 'Runas y clases', renderRunas, false, () => ({ badge: 'nuevo', tono: 'bien',
+      texto: 'keystones y contra qué clase' })],
     ['prep', 'Antes de entrar', renderPrep, false, () => ({ badge: '', texto: 'matchup' })],
     ['cobertura', 'De qué no puedo hablar', renderCobertura, false, () => null],
     ['ledger', 'Hipótesis registradas', renderLedger, false, () => null],

@@ -117,3 +117,123 @@ export async function fetchItems(version: string): Promise<ItemRecord[]> {
   if (out.length === 0) throw new DDragonError(`item.json de ${version} quedó vacío tras filtrar`);
   return out;
 }
+
+/**
+ * A rune, flattened out of Data Dragon's tree-of-slots-of-runes shape.
+ *
+ * `slot` is what makes a KEYSTONE identifiable without a second table: slot 0 of a tree holds
+ * its keystones and nothing else, so `slot === 0` is the definition rather than a hardcoded list
+ * of ids that goes stale every preseason.
+ */
+export type RuneRecord = {
+  runeId: number;
+  /** Riot's internal name, e.g. `Electrocute`. Stable across locales, unlike `name`. */
+  key: string;
+  name: string;
+  treeId: number;
+  treeKey: string;
+  treeName: string;
+  slot: number;
+  /** Path under the CDN, e.g. `perk-images/Styles/Domination/Electrocute/Electrocute.png`. */
+  icon: string;
+  version: string;
+};
+
+export type RuneTreeJson = {
+  id?: number;
+  key?: string;
+  name?: string;
+  slots?: { runes?: { id?: number; key?: string; name?: string; icon?: string }[] }[];
+};
+
+export function runesFromJson(version: string, data: RuneTreeJson[]): RuneRecord[] {
+  const out: RuneRecord[] = [];
+  for (const tree of data) {
+    if (tree.id === undefined) continue;
+    for (const [slot, bucket] of (tree.slots ?? []).entries()) {
+      for (const rune of bucket.runes ?? []) {
+        if (rune.id === undefined) continue;
+        out.push({
+          runeId: rune.id,
+          key: rune.key ?? String(rune.id),
+          name: rune.name ?? String(rune.id),
+          treeId: tree.id,
+          treeKey: tree.key ?? String(tree.id),
+          treeName: tree.name ?? String(tree.id),
+          slot,
+          icon: rune.icon ?? '',
+          version,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+export async function fetchRunes(version: string): Promise<RuneRecord[]> {
+  const body = await getJson(`/cdn/${version}/data/es_MX/runesReforged.json`);
+  if (!Array.isArray(body)) throw new DDragonError(`runesReforged de ${version} no es una lista`);
+  const out = runesFromJson(version, body as RuneTreeJson[]);
+  if (out.length === 0) throw new DDragonError(`runesReforged de ${version} quedó vacío`);
+  return out;
+}
+
+/**
+ * A champion's identity card: the CLASSES Riot assigns it, and nothing derived.
+ *
+ * The classes are the point. Every comparison in this project is against the specific opponent
+ * he happened to face, which is correct and gives an n of one per game; the class is the only
+ * grouping of opponents that exists before the game starts and is therefore usable as a
+ * stratum without inheriting the result (G-008). "How do I do into assassins" is a question his
+ * own cache can answer once the labels exist, and they only exist here.
+ *
+ * `key` is Riot's PascalCase id (`TwistedFate`), which is what a match payload carries, so the
+ * join needs no name normalisation — but consumers still go through `championKey` (G-016),
+ * because op.gg and the vault spell it two other ways.
+ */
+export type ChampionRecord = {
+  championId: number;
+  key: string;
+  name: string;
+  title: string;
+  /** Comma-joined Riot classes: Assassin, Fighter, Mage, Marksman, Support, Tank. */
+  tags: string;
+  version: string;
+};
+
+export type ChampionJson = {
+  key?: string;
+  id?: string;
+  name?: string;
+  title?: string;
+  tags?: string[];
+};
+
+export function championsFromJson(
+  version: string,
+  data: Record<string, ChampionJson>,
+): ChampionRecord[] {
+  const out: ChampionRecord[] = [];
+  for (const champion of Object.values(data)) {
+    const championId = Number(champion.key);
+    if (!Number.isInteger(championId) || champion.id === undefined) continue;
+    out.push({
+      championId,
+      key: champion.id,
+      name: champion.name ?? champion.id,
+      title: champion.title ?? '',
+      tags: (champion.tags ?? []).join(','),
+      version,
+    });
+  }
+  return out;
+}
+
+export async function fetchChampions(version: string): Promise<ChampionRecord[]> {
+  const body = await getJson(`/cdn/${version}/data/es_MX/champion.json`);
+  const data = (body as { data?: Record<string, ChampionJson> }).data;
+  if (data === undefined) throw new DDragonError(`champion.json de ${version} no trae 'data'`);
+  const out = championsFromJson(version, data);
+  if (out.length === 0) throw new DDragonError(`champion.json de ${version} quedó vacío`);
+  return out;
+}

@@ -28,6 +28,7 @@ import {
   RouteError,
   registrarCuenta,
   resumen,
+  runas,
   type SyncEvento,
   sincronizar,
   taguear,
@@ -246,7 +247,7 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
     if (url.pathname.startsWith('/img/')) {
       const [, , kind, file] = url.pathname.split('/');
       if (
-        (kind !== 'champion' && kind !== 'item' && kind !== 'map') ||
+        (kind !== 'champion' && kind !== 'item' && kind !== 'map' && kind !== 'rune') ||
         file === undefined ||
         !safeAssetName(file)
       ) {
@@ -333,7 +334,6 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
         response,
         200,
         await registrarCuenta(
-          db,
           {
             riotId: str(body, 'riotId'),
             label: typeof label === 'string' && label !== '' ? label : null,
@@ -367,6 +367,10 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
     }
     if (url.pathname === '/api/filtros') {
       json(response, 200, filtros(db, cuenta));
+      return;
+    }
+    if (url.pathname === '/api/runas') {
+      json(response, 200, runas(db, alcance));
       return;
     }
     if (url.pathname === '/api/resumen') {

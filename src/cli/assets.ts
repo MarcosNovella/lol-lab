@@ -3,6 +3,7 @@ import {
   ensureChampionIcons,
   ensureItemIcons,
   ensureMap,
+  ensureRuneIcons,
   fetchChampionIndex,
 } from '../riot/assets.ts';
 import { listVersions } from '../riot/ddragon.ts';
@@ -36,7 +37,7 @@ export async function run(argv: string[]): Promise<void> {
   // and eight copies of the same PNG would be eight times the disk for nothing.
   const newest = catalogVersions(db)[0]?.version;
   if (newest === undefined) {
-    out('No hay catálogo de ítems todavía — corré `lol items` primero.');
+    out('No hay catálogos todavía — corré `lol catalogos` primero.');
     db.close();
     return;
   }
@@ -65,15 +66,32 @@ export async function run(argv: string[]): Promise<void> {
       (items.missing.length > 0 ? ` · ${items.missing.length} sin arte en esta versión` : ''),
   );
 
+  // Keystones. Only slot 0 — the panel shows the keystone and nothing else, so downloading the
+  // other sixty runes would be sixty files nobody looks at.
+  const keystones = (
+    db
+      .prepare(
+        'SELECT DISTINCT rune_id, icon FROM runes WHERE slot = 0 AND version = ? ORDER BY rune_id',
+      )
+      .all(newest) as Record<string, unknown>[]
+  ).map((r) => ({ runeId: Number(r['rune_id']), icon: String(r['icon']) }));
+  const runes = await ensureRuneIcons(keystones, root);
+  out(
+    keystones.length === 0
+      ? 'runas      sin catálogo todavía — corré `lol catalogos`'
+      : `runas      ${runes.downloaded} bajadas · ${runes.skipped} ya estaban` +
+          (runes.missing.length > 0 ? ` · ${runes.missing.length} sin arte` : ''),
+  );
+
   const map = await ensureMap(version, root);
   out(`mapa       ${map.downloaded === 1 ? 'bajado' : 'ya estaba'}`);
 
-  const total = champs.bytes + items.bytes + map.bytes;
+  const total = champs.bytes + items.bytes + runes.bytes + map.bytes;
   out('');
   out(total === 0 ? 'Nada nuevo.' : `${(total / 1024 / 1024).toFixed(1)} MB bajados una sola vez.`);
   db.close();
 }
 
 export const SUMMARY =
-  'baja los íconos de campeones e ítems y el minimapa, para que el panel se lea';
+  'baja los íconos de campeones, ítems y runas y el minimapa, para que el panel se lea';
 export const USAGE = 'lol assets [versión]';

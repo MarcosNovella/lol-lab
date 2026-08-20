@@ -47,6 +47,8 @@ const COMMANDS: Record<string, Command> = {
   growth: { summary: growth.SUMMARY, usage: growth.USAGE, run: growth.run },
   page: { summary: page.SUMMARY, usage: page.USAGE, run: page.run },
   hip: { summary: hip.SUMMARY, usage: hip.USAGE, run: hip.run },
+  catalogos: { summary: items.SUMMARY, usage: items.USAGE, run: items.run },
+  // Kept as an alias: it is what the README said for two sessions and what his fingers know.
   items: { summary: items.SUMMARY, usage: items.USAGE, run: items.run },
   backfill: { summary: backfill.SUMMARY, usage: backfill.USAGE, run: backfill.run },
   assets: { summary: assets.SUMMARY, usage: assets.USAGE, run: assets.run },
@@ -57,12 +59,17 @@ function help(): void {
   out('lol — el motor, desde la terminal');
   out();
   const width = Math.max(...Object.keys(COMMANDS).map((k) => k.length));
+  const vistos = new Set<string>();
   for (const [name, command] of Object.entries(COMMANDS)) {
+    // An alias shares its module with the command it aliases, so it would otherwise print the
+    // same line twice and read as two different things you could run.
+    if (vistos.has(command.summary)) continue;
+    vistos.add(command.summary);
     out(`  ${name.padEnd(width)}  ${command.summary}`);
   }
   out();
   out('Uso:');
-  for (const command of Object.values(COMMANDS)) out(`  ${command.usage}`);
+  for (const command of new Set(Object.values(COMMANDS).map((c) => c.usage))) out(`  ${command}`);
   out();
   out('El ritual es `lol cerrar`. Todo lo demás es para cuando querés mirar algo puntual.');
 }

@@ -315,6 +315,69 @@ vive en `data/`, que es gitignoreado, y se borró al terminar.
   `catalogForPatch` ordena versiones como texto, así que `.9` gana sobre `.10` dentro de un mismo
   parche.
 
+## S10 2026-08-20, CLOUD — el panel se pliega, y dos dimensiones que ya estaban
+
+Dos pedidos: (1) que se vea mejor y no haya tanto en pantalla de una, con desplegables; (2) que
+si hace falta bajar librerías o buscar APIs y datos externos, se haga.
+
+**LIBRERÍAS: ninguna, y el permiso se gastó en otra cosa.** El panel es 1.900 líneas de vanilla
+sobre `node:http`, sin build step (ADR-003). Meter Chart.js o similar es o un `<script>` a un CDN
+— que rompe la promesa del header, igual que ADR-021 rechazó hotlinkear el arte de Riot — o
+vendorear un blob minificado al repo más una ruta que lo sirva. El hover que faltaba en la curva
+salió en 40 líneas de vanilla sobre el SVG que ya existe. El permiso rindió en los DATOS.
+
+### El panel (ADR-024, ADR-025)
+- Una tarjeta dice qué hacer ahora; el resto son once secciones plegadas que se calculan recién
+  al abrirlas. Cada título lleva su número (*Taguear 45*, *key falta*): cerrada no es a ciegas.
+  Se acuerdan de cómo las dejó. El arranque pasó de nueve renders y cinco fetches a dos.
+- **El alcance era una mentira**: `cuenta=smurf` estaba escrito en el JavaScript del panel y
+  `role:'MIDDLE', queueId:420` adentro de `momentos` y `graficos`. La main era inalcanzable desde
+  una página que la listaba, y toda partida fuera de mid soloq era invisible sin que nada dijera
+  que había un filtro. Ahora cuenta/rol/cola se eligen arriba, viajan en la URL y las lee cada
+  ruta; la memo del mapa incluye el alcance.
+- Partidas: lista filtrable por campeón, resultado, tag y rival, con el detalle completo de cada
+  una al desplegarla — es `riot_match_detail` hecho visible.
+- Avisos apilados, atajos (1/2/3, s, p, e/E, ?), buscador en cobertura, tooltip en la curva.
+
+### Runas y clases (ADR-026) — lo que el permiso de "APIs externas" compró de verdad
+**Los perks estaban en la caché desde el primer sync y nada los leía.** ADR-004 guarda el JSON
+completo justamente para esto: sólo faltaba una tabla que dijera qué significa cada id. Bajarla
+no cuesta un solo request de Riot — Data Dragon es otro host, sin key y sin limiter.
+
+- `lol catalogos` (alias `lol items`) baja tres tablas por parche: ítems, **runas** (62, 17
+  keystones) y **campeones** (173, con sus clases). `lol assets` baja los íconos de keystone.
+- `src/analysis/runes.ts`: keystone = slot 0 del árbol primario, que es la definición y no una
+  lista de ids que envejece cada pretemporada. Tabla por keystone, la suya y la del rival, con n.
+- `src/analysis/classes.ts`: récord contra cada clase de rival. Es el ÚNICO agrupamiento de
+  rivales que existe antes de que empiece la partida, así que es el único usable como estrato sin
+  heredar el resultado. Tabla entera siempre (G-028); un campeón con dos clases cuenta en las dos
+  y el panel dice que por eso las filas no suman.
+- Las dos son DESCRIPCIÓN y lo dicen en pantalla: no elegís keystone al azar.
+
+### Bugs, casi todos míos y todos encontrados abriendo la página
+- `esc()` era código muerto y lo usé sobre el script: adentro de `<script>` las entidades no se
+  decodifican, así que cada arrow function quedó como entidad. Panel en blanco, consola vacía.
+  G-036.
+- Backtick en un comentario CSS terminó `CLIENT_STYLE` 300 líneas antes. G-037. **Volví a
+  cometerlo dos veces más en esta sesión**; el test lo agarró las tres, que es exactamente para
+  lo que está.
+- `.ahora` era la tarjeta hero Y el modificador de urgencia: un punto de 6px salió como blob de
+  40px. G-038.
+- La cuenta por defecto salía de un `GROUP BY` sobre `participants` — que tiene a los diez
+  jugadores — así que devolvía un desconocido y caía al orden alfabético. G-039.
+- **LeBlanc sin clase**: el catálogo se keyeaba por el `id` de Data Dragon (`Leblanc`) y se leía
+  con el `championName` de Riot (`LeBlanc`). G-016 por tercera vez. G-040.
+- `KeystoneRow` no llevaba `runeId`, así que todos los íconos pedían `undefined.png` y el
+  `onerror` los borraba en silencio: la tabla simplemente no tenía fotos. G-041.
+
+verify verde, **351 tests** (332 → 351). Visto en Chromium, con arte real, cero errores de
+consola.
+
+### Para la próxima sesión, con datos reales
+Correr una vez: `pnpm lol catalogos` y `pnpm lol assets`. Todo lo de S10 se verificó sobre 45
+partidas sintéticas con varianza cero — la forma está probada, los números todavía no dijeron
+nada. La vista que nunca existió y que miraría primero es *Cómo viene* sin filtrar por rol.
+
 ## Open questions
 - **Diana**: closed by D3 as "the ledger decides", with the caveat that at n=5 needing 25, and 8
   games since he last played her, it may never reach n.

@@ -132,15 +132,25 @@ export function goldCurveSvg(points: CurvePoint[], width = 520, height = 200): s
   const y = (gold: number): number => height / 2 - (gold / extent) * (height / 2 - pad / 2);
 
   const line = points.map((p) => `${x(p.minute).toFixed(1)},${y(p.goldDiff).toFixed(1)}`).join(' ');
+  // Two circles per point. The visible one is 4.5px because a 3.5px dot is below the size a
+  // marker needs to be read at a glance; the invisible one is 12px because a hit target must be
+  // bigger than the mark it selects — chasing a 4px dot with a mouse is not an interaction.
+  //
+  // The `<title>` stays as the floor: it is what a reader gets with no JavaScript, in the static
+  // page, and in a screen reader. The data attributes are what the panel's own tooltip reads,
+  // and they are inert everywhere else.
   const dots = points
-    .map(
-      (p) =>
-        `<circle class="${p.goldDiff >= 0 ? 'up' : 'down'}" cx="${x(p.minute).toFixed(1)}" cy="${y(
-          p.goldDiff,
-        ).toFixed(
-          1,
-        )}" r="3.5"><title>${esc(`${p.minute}′ ${p.goldDiff >= 0 ? '+' : ''}${p.goldDiff}`)}</title></circle>`,
-    )
+    .map((p) => {
+      const cx = x(p.minute).toFixed(1);
+      const cy = y(p.goldDiff).toFixed(1);
+      const signed = `${p.goldDiff >= 0 ? '+' : ''}${p.goldDiff}`;
+      return (
+        `<circle class="${p.goldDiff >= 0 ? 'up' : 'down'}" cx="${cx}" cy="${cy}" r="4.5">` +
+        `<title>${esc(`${p.minute}′ ${signed} de oro`)}</title></circle>` +
+        `<circle class="hit" cx="${cx}" cy="${cy}" r="12" data-minuto="${p.minute}" ` +
+        `data-oro="${p.goldDiff}" data-cs="${p.csDiff}" data-xp="${p.xpDiff}"/>`
+      );
+    })
     .join('\n');
   const ticks = points
     .map(
@@ -171,6 +181,10 @@ ${ticks}
  * the builders emit has a rule here.
  */
 export const SVG_STYLE = `
+/* Invisible hit targets. Without a rule they render as black discs over the whole chart — the
+   builders carry no presentation of their own, which is exactly the G-023 trap. */
+.hit { fill: transparent; cursor: crosshair; }
+
 svg { display: block; max-width: 100%; }
 rect.plot { fill: var(--plot); }
 /* The veil over the minimap photo: without it the dots compete with the artwork. */

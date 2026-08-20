@@ -12,6 +12,7 @@ import {
   tagOf,
   untaggedGames,
 } from '../analysis/capture.ts';
+import { clasesDe, type FilaClase, porClaseRival, sinClasificar } from '../analysis/classes.ts';
 import { coverageOf, coverageTotals } from '../analysis/coverage.ts';
 import { biggestSwing, phaseSplit, stateCurve } from '../analysis/curve.ts';
 import { evaluationsOf, listHypotheses, verdictLabel } from '../analysis/hypotheses.ts';
@@ -36,11 +37,25 @@ import {
 } from '../analysis/priors.ts';
 import { describeRank, latestSnapshot, TRACKED_QUEUES } from '../analysis/rank.ts';
 import { type DeathDot, deathMapSvg, goldCurveSvg, isOwnHalf } from '../analysis/render.ts';
+import {
+  byKeystone,
+  type Keystone,
+  type KeystoneRow,
+  keystoneOf,
+  type RuneDuel,
+  runeDuelOf,
+  unreadableKeystones,
+} from '../analysis/runes.ts';
 import { mean, round } from '../analysis/stats.ts';
 import { keyState } from '../riot/key.ts';
 import type { Db } from '../store/db.ts';
 import { ASSETS_ROOT } from '../store/db.ts';
-import { catalogForPatch } from '../store/items.ts';
+import {
+  type ChampionCatalog,
+  catalogForPatch,
+  championsForPatch,
+  runesForPatch,
+} from '../store/items.ts';
 import {
   findAccount,
   getRawMatch,
@@ -525,10 +540,10 @@ export async function sincronizar(
  * ritual you cannot start there is not one.
  *
  * The client is injected the same way the sync's is, so this route is testable without a key
- * and without the network.
+ * and without the network — and it takes no `Db`, deliberately: the injected resolver is what
+ * writes the account, so a database handle here would be a parameter that only looks load-bearing.
  */
 export async function registrarCuenta(
-  db: Db,
   input: { riotId: string; label: string | null },
   resolver: (
     gameName: string,
@@ -1064,6 +1079,15 @@ export type PartidaDetalle = {
   parche: string | null;
   kda: string;
   tag: string | null;
+  /**
+   * The keystone each of them ran, from the match payload itself.
+   *
+   * NOT under `derivado`: it needs no timeline at all, so a game with no minute data still shows
+   * it. Null only when the patch has no rune catalogue or the payload carries no perks.
+   */
+  runas: { mia: Keystone | null; suya: Keystone | null } | null;
+  /** The opponent's Riot classes, which is the one grouping known before the game starts. */
+  clasesRival: string[];
   /** Null when the game has no timeline: everything below it is derived from minute data. */
   derivado: {
     curva: { minuto: number; oro: number; cs: number; xp: number }[];
@@ -1096,25 +1120,38 @@ export function partida(db: Db, cuenta: string, matchId: string): PartidaDetalle
   const match = getRawMatch(db, matchId);
   const timeline = getRawTimeline(db, matchId);
   const me = match?.info.participants.find((p) => p.puuid === puuid);
+
+  const runeCatalog = runesForPatch(db, row.patch ?? '');
+  const champCatalog = championsForPatch(db, row.patch ?? '');
   const rival =
     match === null || me === undefined
       ? null
       : (match.info.participants.find(
           (p) => p.teamPosition === me.teamPosition && p.teamId !== me.teamId,
-        )?.championName ?? null);
+        ) ?? null);
 
   const cabecera = {
     matchId,
     at: row.gameCreation,
     gano: row.win === 1,
     campeon: row.champion,
-    rival,
+    rival: rival?.championName ?? null,
     rol: ROL_LABEL[row.teamPosition] ?? row.teamPosition.toLowerCase(),
     cola: COLA_LABEL[row.queueId] ?? `cola ${row.queueId}`,
     duracion: row.gameDuration,
     parche: row.patch,
     kda: `${row.kills}/${row.deaths}/${row.assists}`,
     tag: tagOf(db, matchId, puuid),
+    runas:
+      runeCatalog === null || me === undefined
+        ? null
+        : {
+            mia: keystoneOf(me, runeCatalog),
+            suya: rival === null ? null : keystoneOf(rival, runeCatalog),
+          },
+    // Through `clasesDe`, not a raw `Map.get`: that is the whole point of the normaliser.
+    clasesRival:
+      champCatalog === null || rival === null ? [] : clasesDe(rival.championName, champCatalog),
   };
 
   if (match === null || timeline === null) return { ...cabecera, derivado: null };
@@ -1193,6 +1230,75 @@ export function partida(db: Db, cuenta: string, matchId: string): PartidaDetalle
             },
       sinCatalogo: catalogo === null ? (row.patch ?? '?') : null,
     },
+  };
+}
+
+// ------------------------------------------------------------- runas y clases
+
+/**
+ * Two dimensions that were already in the cache and had nothing to read them.
+ *
+ * The keystones come out of every match's `perks`, stored since the first sync because ADR-004
+ * keeps the whole payload; all they needed was a table saying what a perk id meant that patch.
+ * The classes come from Data Dragon's champion list. Between them they cost ZERO Riot requests —
+ * one catalogue fetch per patch on a keyless, unlimited host, and nothing else.
+ *
+ * Both are reported as WHOLE TABLES with their denominators. A keystone win rate carries every
+ * reason he picked that keystone, and a class row is a slice that only means something with the
+ * other slices beside it (G-028) — so nothing here is ranked, and nothing is called better.
+ */
+export type Runas = {
+  jugadas: number;
+  /** Games whose keystone could not be read, split by whose it was. Never silently dropped. */
+  sinLeer: { mias: number; suyas: number };
+  /** Null when no patch in scope has a rune catalogue: `lol catalogos` fixes it. */
+  faltaCatalogo: string | null;
+  mias: KeystoneRow[];
+  suyas: KeystoneRow[];
+  clases: FilaClase[];
+  sinClasificar: number;
+};
+
+export function runas(db: Db, alcance: Alcance): Runas {
+  const { puuid } = cuentaDe(db, alcance.cuenta);
+  const rows = queryParticipants(db, consultaDe(puuid, alcance));
+
+  const duelos: RuneDuel[] = [];
+  const juegos: { win: boolean; opponentChampion: string | null }[] = [];
+  let faltaCatalogo: string | null = null;
+  let champCatalog: ChampionCatalog | null = null;
+
+  for (const row of rows) {
+    const match = getRawMatch(db, row.matchId);
+    if (match === null) continue;
+    // Per patch, because a rune's tree moves every preseason and reading a 15.x game against
+    // the newest table would relabel it (ADR-020). A patch with no catalogue is NAMED.
+    const catalog = runesForPatch(db, row.patch ?? '');
+    if (catalog === null) {
+      faltaCatalogo ??= row.patch ?? '?';
+    } else {
+      const duel = runeDuelOf(match, puuid, catalog);
+      if (duel !== null) duelos.push(duel);
+    }
+    champCatalog ??= championsForPatch(db, row.patch ?? '');
+    const me = match.info.participants.find((p) => p.puuid === puuid);
+    const rival =
+      me === undefined
+        ? null
+        : (match.info.participants.find(
+            (p) => p.teamPosition === me.teamPosition && p.teamId !== me.teamId,
+          )?.championName ?? null);
+    juegos.push({ win: row.win === 1, opponentChampion: rival });
+  }
+
+  return {
+    jugadas: rows.length,
+    sinLeer: unreadableKeystones(duelos),
+    faltaCatalogo,
+    mias: byKeystone(duelos, 'mine'),
+    suyas: byKeystone(duelos, 'theirs'),
+    clases: champCatalog === null ? [] : porClaseRival(juegos, champCatalog),
+    sinClasificar: champCatalog === null ? juegos.length : sinClasificar(juegos, champCatalog),
   };
 }
 

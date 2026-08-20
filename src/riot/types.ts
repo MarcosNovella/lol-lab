@@ -63,6 +63,23 @@ export type ParticipantDto = {
   champLevel?: number;
   summoner1Id?: number;
   summoner2Id?: number;
+  /**
+   * The runes he took. Optional because it is read out of the RAW payload rather than a column,
+   * and because a remake or an odd queue can ship without it.
+   *
+   * It has been in the cache since the first sync and nothing ever read it — which is ADR-004
+   * paying out exactly as written: the full match JSON is stored precisely so a dimension nobody
+   * thought to flatten can be derived later without re-downloading eighty-six games against a
+   * rate limit.
+   */
+  perks?: {
+    statPerks?: { defense?: number; flex?: number; offense?: number };
+    styles?: {
+      description?: string;
+      style?: number;
+      selections?: { perk?: number }[];
+    }[];
+  };
   item0?: number;
   item1?: number;
   item2?: number;

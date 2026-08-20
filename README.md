@@ -76,6 +76,7 @@ calcula nada hasta que la abrís. Se acuerdan de cómo las dejaste.
 | **Partidas** | la lista completa, filtrable por campeón, resultado, tag y rival. Cada fila se despliega con TODO lo derivable de esa partida: curva de oro, fases, peleas, muertes, épicos, tempo, roams, build con íconos y los momentos más caros. |
 | **Lo que salió caro** | las últimas cinco, con la build y los tres momentos de cada una. |
 | **Curva y mapa** | la curva de oro de la última partida medible y el mapa de muertes sobre el minimapa real. |
+| **Runas y clases** | qué keystone llevás vos y cuál te tocó enfrente, con winrate y n; y tu récord contra cada clase de campeón. Sale de partidas que ya tenías: no gasta un solo request de Riot. |
 | **Antes de entrar** | el matchup: tu récord acá, tus reps en todas las cuentas, el meta de op.gg. |
 | **De qué no puedo hablar** | la cobertura, con buscador. |
 | **Hipótesis** | el ledger. |
@@ -98,7 +99,7 @@ acordarse, no observar — el software anota cuánto tardaste, así que no se me
 
 Si preferís la terminal, `pnpm lol cerrar` hace el mismo ritual con una tecla por partida
 (`y` la produje yo · `i` salía igual · `p` estuvo pareja). `pnpm lol` solo lista todo lo demás:
-`cuenta`, `report`, `prep`, `cobertura`, `growth`, `page`, `hip`, `rank`, `items`, `backfill`.
+`cuenta`, `report`, `prep`, `cobertura`, `growth`, `page`, `hip`, `rank`, `catalogos`, `backfill`.
 
 `pnpm lol cuenta <Nombre#TAG> [etiqueta]` es el primer paso de todo: resuelve el Riot ID y lo
 guarda con el nombre corto que después usa el resto (`lol report smurf`).
@@ -109,13 +110,18 @@ una partida que entró sin él se queda sin él para siempre, y **sin timeline n
 estado de línea, ni conversión, ni momentos caros, ni ítems, ni mapa de muertes. El panel lo
 corre solo como segunda fase del botón de sincronizar, y te dice cuántas quedan.
 
-`pnpm lol items` es de una sola vez por parche: baja la tabla de ítems de Data Dragon (sin key,
-sin rate limit, un catálogo por parche que hayas jugado) y con eso el reporte y el panel pueden
-decirte cuándo completaste cada ítem y cuándo lo completó tu rival de línea. Después de un parche
-nuevo, corrélo una vez.
+`pnpm lol catalogos` es de una sola vez por parche (`lol items` sigue funcionando, es el mismo
+comando). Baja **tres** tablas de Data Dragon — ítems, runas y clases de campeón — sin key, sin
+rate limit, una por parche que hayas jugado. Con eso el panel puede decirte cuándo completaste
+cada ítem, qué keystone llevaste y contra qué clase de campeón te fue mejor o peor.
 
-`pnpm lol assets` es de una sola vez a secas: baja los retratos de campeón, los íconos de ítem y
-el minimapa (5.9 MB) a `data/img/`, y el panel los sirve desde tu máquina. No hay hotlink a la
+**Las runas ya estaban en la caché.** Cada partida guarda el payload completo desde el primer
+sync, así que los perks estuvieron ahí todo el tiempo y no había tabla que dijera qué significaba
+cada id. Bajar esa tabla no cuesta ni un request de Riot. Después de un parche nuevo, corrélo una
+vez.
+
+`pnpm lol assets` es de una sola vez a secas: baja los retratos de campeón, los íconos de ítem y de
+keystone, y el minimapa a `data/img/`, y el panel los sirve desde tu máquina. No hay hotlink a la
 CDN de Riot: sin esto la página funciona igual, pero en texto.
 
 ## Las tools

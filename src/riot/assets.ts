@@ -19,7 +19,7 @@ import { DDragonError } from './ddragon.ts';
 const BASE = 'https://ddragon.leagueoflegends.com';
 
 /** Where a downloaded asset lives, relative to the assets root. */
-export function assetPath(kind: 'champion' | 'item' | 'map', file: string): string {
+export function assetPath(kind: 'champion' | 'item' | 'map' | 'rune', file: string): string {
   return `${kind}/${file}`;
 }
 
@@ -142,4 +142,40 @@ export async function ensureMap(version: string, root: string): Promise<AssetRep
   if (existsSync(dest)) return { downloaded: 0, skipped: 1, missing: [], bytes: 0 };
   const bytes = await download(`${BASE}/cdn/${version}/img/map/map11.png`, dest);
   return { downloaded: 1, skipped: 0, missing: [], bytes };
+}
+
+/**
+ * Keystone icons.
+ *
+ * Unlike champions and items, a rune's art does NOT live under a versioned path: Data Dragon
+ * serves `/cdn/img/perk-images/...` with no version segment, and the catalogue hands over that
+ * whole relative path. So the URL is built from the catalogue rather than from an id, and the
+ * file is stored under the rune's numeric id — which is what a match payload carries and
+ * therefore what the page has at render time without a lookup.
+ */
+export async function ensureRuneIcons(
+  runes: { runeId: number; icon: string }[],
+  root: string,
+): Promise<AssetReport> {
+  const report: AssetReport = { downloaded: 0, skipped: 0, missing: [], bytes: 0 };
+  for (const rune of runes) {
+    const dest = join(root, 'rune', `${rune.runeId}.png`);
+    if (existsSync(dest)) {
+      report.skipped += 1;
+      continue;
+    }
+    if (rune.icon === '' || rune.icon.includes('..')) {
+      report.missing.push(String(rune.runeId));
+      continue;
+    }
+    try {
+      report.bytes += await download(`${BASE}/cdn/img/${rune.icon}`, dest);
+      report.downloaded += 1;
+    } catch {
+      // A rune removed in a later preseason keeps its id in old games and loses its art. The
+      // page falls back to the name, exactly as it does for a missing item icon.
+      report.missing.push(String(rune.runeId));
+    }
+  }
+  return report;
 }
