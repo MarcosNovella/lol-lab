@@ -11,28 +11,34 @@ import {
   startSyncLog,
   upsertAccount,
 } from '../src/store/matches.ts';
-import { CLIENT_SCRIPT } from '../src/ui/page.ts';
+import { CLIENT_SCRIPT, CLIENT_STYLE, renderShell } from '../src/ui/page.ts';
 import {
   abrirSesion,
+  alcanceDe,
   cerrarSesion,
   cobertura,
+  cuentaPorDefecto,
   dejarAtras,
   estado,
+  filtros,
   graficos,
   ledger,
   momentos,
   olvidarMapa,
+  partida,
+  partidas,
   pendientes,
   prep,
   RouteError,
   registrarCuenta,
+  resumen,
   type SyncEvento,
   sincronizar,
   syncEnCurso,
   taguear,
 } from '../src/ui/routes.ts';
 import { guard, HOST, newToken, startUiOnFreePort } from '../src/ui/server.ts';
-import { match, participant } from './fixtures.ts';
+import { lobby, match, participant } from './fixtures.ts';
 
 /**
  * The UI's guards and its status panel.
@@ -421,7 +427,7 @@ describe('la página', () => {
     expect(() => new Function(CLIENT_SCRIPT)).not.toThrow();
   });
 
-  it('carries no raw backtick, which would end the template it lives in', () => {
+  it('carries no raw backtick in EITHER inline literal, script or stylesheet', () => {
     // The `new Function` check above catches this ONLY when the code that spills out of the
     // string happens to be invalid TypeScript. It did today — a JSDoc comment inside the script
     // referred to a route in backticks, the literal ended there, and the rest of the file became
@@ -429,8 +435,27 @@ describe('la página', () => {
     //
     // So the byte is banned outright, the same way G-018 bans a raw control character: a
     // backtick that is genuinely wanted inside this script is written as an escape.
+    //
+    // The stylesheet is checked too, and that is not belt-and-braces: a CSS comment written as
+    // a backticked <details> ended CLIENT_STYLE mid-file the very next time this page was
+    // rewritten. The rule is about the SHAPE — anything that ships as a template literal — and
+    // pinning it to one of the two literals is how it gets rediscovered in the other.
     const BACKTICK = String.fromCharCode(96);
     expect(CLIENT_SCRIPT).not.toContain(BACKTICK);
+    expect(CLIENT_STYLE).not.toContain(BACKTICK);
+  });
+
+  it('cannot break out of the script element it is injected into', () => {
+    // The script goes into the document RAW, because inside a <script> element the HTML parser
+    // does not decode entities: escaping it turns every '=>' into '=&gt;' and the page loads a
+    // syntax error without a word. That was tried, and it produced a blank panel with an empty
+    // console. Raw is correct — the content is a compile-time constant — but it puts the burden
+    // here: a literal closing tag anywhere in the script would end the element early.
+    const shell = renderShell('tok');
+    expect(CLIENT_SCRIPT.toLowerCase()).not.toContain('</script');
+    // And what actually lands in the document is the script itself, not an escaped copy of it.
+    expect(shell).toContain('=>');
+    expect(shell).not.toContain('=&gt;');
   });
 
   it('never inlines data into the shell', () => {
@@ -458,7 +483,7 @@ describe('las vistas de lectura', () => {
 
   it('reports a game with no timeline as such instead of as one with no moments', () => {
     seedGame(db, 'LA2_A', CREATION);
-    const [partida] = momentos(db, 'smurf');
+    const [partida] = momentos(db, alcanceDe({ cuenta: 'smurf' }));
     // Two different facts: "nothing was derivable" and "nothing expensive happened". Collapsing
     // them would quietly report a missing backfill as a clean game.
     expect(partida?.sinTimeline).toBe(true);
@@ -468,7 +493,7 @@ describe('las vistas de lectura', () => {
   it('carries the tag onto the game it belongs to', () => {
     seedGame(db, 'LA2_A', CREATION);
     tagGame(db, { matchId: 'LA2_A', puuid: 'smurf-puuid', tag: 'mía' });
-    expect(momentos(db, 'smurf')[0]?.tag).toBe('mía');
+    expect(momentos(db, alcanceDe({ cuenta: 'smurf' }))[0]?.tag).toBe('mía');
   });
 
   it('states the scope on every coverage answer', () => {
@@ -489,7 +514,7 @@ describe('las vistas de lectura', () => {
 
   it('draws a map even with no deaths, and says the count is zero', () => {
     seedGame(db, 'LA2_A', CREATION);
-    const g = graficos(db, 'smurf');
+    const g = graficos(db, alcanceDe({ cuenta: 'smurf' }));
     expect(g.muertes).toBe(0);
     expect(g.mapa).toContain('<svg');
   });
@@ -520,19 +545,19 @@ describe('la memoización del mapa de muertes', () => {
 
   it('serves the same answer twice without recomputing', () => {
     seedGame(db, 'LA2_A', CREATION);
-    const primera = graficos(db, 'smurf');
-    const segunda = graficos(db, 'smurf');
+    const primera = graficos(db, alcanceDe({ cuenta: 'smurf' }));
+    const segunda = graficos(db, alcanceDe({ cuenta: 'smurf' }));
     // Identity, not equality: the second call returned the memo rather than an equal object.
     expect(segunda).toBe(primera);
   });
 
   it('invalidates when a game arrives — the half that actually matters', () => {
     seedGame(db, 'LA2_A', CREATION);
-    const antes = graficos(db, 'smurf');
+    const antes = graficos(db, alcanceDe({ cuenta: 'smurf' }));
     expect(antes.partidas).toBe(0); // no timeline yet, so nothing derivable
 
     seedGame(db, 'LA2_B', CREATION + HOUR);
-    const despues = graficos(db, 'smurf');
+    const despues = graficos(db, alcanceDe({ cuenta: 'smurf' }));
     // A cache that does not invalidate is worse than no cache: it would keep answering with a
     // map that silently predates the games he just played.
     expect(despues).not.toBe(antes);
@@ -540,7 +565,7 @@ describe('la memoización del mapa de muertes', () => {
 
   it('invalidates on a TIMELINE BACKFILL, which changes no game and no id', () => {
     seedGame(db, 'LA2_A', CREATION);
-    const antes = graficos(db, 'smurf');
+    const antes = graficos(db, alcanceDe({ cuenta: 'smurf' }));
     expect(antes.partidas).toBe(0);
 
     // The trap this test exists for: backfilling adds deaths to a game already in the cache
@@ -558,7 +583,7 @@ describe('la memoización del mapa de muertes', () => {
       },
     });
 
-    const despues = graficos(db, 'smurf');
+    const despues = graficos(db, alcanceDe({ cuenta: 'smurf' }));
     expect(despues).not.toBe(antes);
     expect(despues.partidas).toBe(1);
   });
@@ -752,5 +777,194 @@ describe('registrar una cuenta desde el panel', () => {
         throw new Error('Falta RIOT_API_KEY');
       }),
     ).rejects.toThrow(/RIOT_API_KEY/);
+  });
+});
+
+/**
+ * The scope, and the two hardcodes it replaced.
+ *
+ * The panel used to carry the string 'smurf' in its own JavaScript and `role: 'MIDDLE',
+ * queueId: 420` inside the routes. He has two accounts and the second was unreachable from a
+ * page that listed it in the sidebar; every game outside mid soloq was invisible on a page that
+ * never said it was filtering.
+ */
+describe('el alcance', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'smurf-puuid',
+      gameName: 'LegendofTorcuato',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+    upsertAccount(db, {
+      puuid: 'main-puuid',
+      gameName: 'LaMarso',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'main',
+    });
+  });
+
+  /** One game, with him on `puuid` in `role`, and a same-role opponent. */
+  function juego(id: string, opts: { puuid: string; role: string; queueId: number; at: number }) {
+    const m = lobby({ matchId: id, index: 1, gameCreation: opts.at, win: true });
+    for (const p of m.info.participants) {
+      if (p.puuid === 'me') {
+        p.puuid = opts.puuid;
+        p.teamPosition = opts.role;
+      } else if (p.teamPosition === 'MIDDLE' && p.teamId === 200) {
+        p.teamPosition = opts.role;
+      }
+    }
+    m.metadata.participants = m.info.participants.map((p) => p.puuid);
+    m.info.queueId = opts.queueId;
+    saveMatch(db, flattenMatch(m), m);
+  }
+
+  it('reads a role and a queue instead of assuming mid soloq', () => {
+    juego('LA2_A', { puuid: 'smurf-puuid', role: 'MIDDLE', queueId: 420, at: 1_000 });
+    juego('LA2_B', { puuid: 'smurf-puuid', role: 'TOP', queueId: 440, at: 2_000 });
+
+    const todo = resumen(db, alcanceDe({ cuenta: 'smurf' }));
+    expect(todo.jugadas).toBe(2);
+
+    const soloTop = resumen(db, alcanceDe({ cuenta: 'smurf', rol: 'TOP' }));
+    expect(soloTop.jugadas).toBe(1);
+
+    const soloFlex = resumen(db, alcanceDe({ cuenta: 'smurf', cola: '440' }));
+    expect(soloFlex.jugadas).toBe(1);
+  });
+
+  it('treats "todos" and an empty string as no filter at all', () => {
+    expect(alcanceDe({ cuenta: 'x', rol: 'todos', cola: '0' })).toEqual({
+      cuenta: 'x',
+      rol: null,
+      cola: null,
+    });
+    expect(alcanceDe({ cuenta: 'x', rol: '', cola: '' })).toEqual({
+      cuenta: 'x',
+      rol: null,
+      cola: null,
+    });
+    // And it normalises the role, so 'middle' from a URL is the same filter as 'MIDDLE'.
+    expect(alcanceDe({ cuenta: 'x', rol: 'middle' }).rol).toBe('MIDDLE');
+  });
+
+  it('offers only the roles, queues and champions the cache actually holds', () => {
+    juego('LA2_A', { puuid: 'smurf-puuid', role: 'MIDDLE', queueId: 420, at: 1_000 });
+    const f = filtros(db, 'smurf');
+    // A select offering BOTTOM to someone who has never played bot lane is a control whose only
+    // outcome is an empty table, and the reader cannot tell that apart from a bug.
+    expect(f.roles.map((r) => r.valor)).toEqual(['MIDDLE']);
+    expect(f.colas.map((c) => c.valor)).toEqual([420]);
+    expect(f.cuentas.map((c) => c.valor).sort()).toEqual(['main', 'smurf']);
+  });
+
+  it('defaults to the account he PLAYED last, not the alphabetically first', () => {
+    // `listAccounts` orders by game name, so 'main' (LaMarso) sorts before 'smurf'
+    // (LegendofTorcuato). On his real cache that would open the panel on eleven games while
+    // seventy-five sit on the other account.
+    juego('LA2_A', { puuid: 'smurf-puuid', role: 'MIDDLE', queueId: 420, at: 9_000_000 });
+    juego('LA2_B', { puuid: 'main-puuid', role: 'MIDDLE', queueId: 420, at: 1_000 });
+    expect(cuentaPorDefecto(db)).toBe('smurf');
+  });
+
+  it('does not let the OTHER nine players of a match decide the default account', () => {
+    // `participants` holds all ten players, so grouping it by puuid and taking the newest game
+    // returns whichever stranger was in the last one. It did, and the panel silently fell back
+    // to the alphabetical answer.
+    juego('LA2_A', { puuid: 'main-puuid', role: 'MIDDLE', queueId: 420, at: 5_000 });
+    expect(cuentaPorDefecto(db)).toBe('main');
+  });
+
+  it('answers with no account at all when the cache is empty', () => {
+    const vacia = openDb(':memory:');
+    expect(cuentaPorDefecto(vacia)).toBeNull();
+  });
+});
+
+describe('la lista de partidas', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'me',
+      gameName: 'T',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+    for (let i = 0; i < 6; i += 1) {
+      const m = lobby({
+        matchId: `LA2_L${i}`,
+        index: i,
+        gameCreation: 1_760_000_000_000 + i * 3_600_000,
+        win: i % 2 === 0,
+      });
+      const me = m.info.participants.find((p) => p.puuid === 'me');
+      if (me) me.championName = i < 3 ? 'Diana' : 'Ahri';
+      saveMatch(db, flattenMatch(m), m);
+    }
+  });
+
+  const TODO = () => alcanceDe({ cuenta: 'smurf' });
+
+  it('filters by champion, by result and by both at once', () => {
+    expect(partidas(db, TODO()).length).toBe(6);
+    expect(partidas(db, TODO(), { campeon: 'Diana' }).length).toBe(3);
+    expect(partidas(db, TODO(), { resultado: 'ganadas' }).length).toBe(3);
+    expect(partidas(db, TODO(), { campeon: 'Diana', resultado: 'perdidas' }).length).toBe(1);
+  });
+
+  it('tells "any tag" apart from "not tagged", which are different questions', () => {
+    tagGame(db, { matchId: 'LA2_L0', puuid: 'me', tag: 'mía' });
+    expect(partidas(db, TODO(), { tag: 'mía' }).map((p) => p.matchId)).toEqual(['LA2_L0']);
+    // 'sin' is the one the ritual cares about: the games it missed.
+    expect(partidas(db, TODO(), { tag: 'sin' }).length).toBe(5);
+  });
+
+  it('caps the page and never lets a caller ask for the whole cache', () => {
+    expect(partidas(db, TODO(), { limite: 2 }).length).toBe(2);
+    expect(partidas(db, TODO(), { limite: 100_000 }).length).toBe(6);
+  });
+
+  it('says a game has no timeline instead of quietly showing it as ordinary', () => {
+    // Without a timeline the row has no minute data at all, so opening it can only ever say so.
+    expect(partidas(db, TODO())[0]?.sinTimeline).toBe(true);
+  });
+});
+
+describe('el detalle de una partida', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'me',
+      gameName: 'T',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+  });
+
+  it('reports a game with no timeline as underived rather than as empty', () => {
+    const m = lobby({ matchId: 'LA2_D1', index: 1, win: true });
+    saveMatch(db, flattenMatch(m), m);
+    const d = partida(db, 'smurf', 'LA2_D1');
+    // The header still exists — champion, result, KDA all come from the match row.
+    expect(d.campeon).toBe('Diana');
+    expect(d.gano).toBe(true);
+    // And everything that needs minute data is one explicit null, not nine empty arrays.
+    expect(d.derivado).toBeNull();
+  });
+
+  it('refuses a match that account did not play, instead of inventing a perspective', () => {
+    expect(() => partida(db, 'smurf', 'LA2_NO_EXISTE')).toThrow(RouteError);
   });
 });

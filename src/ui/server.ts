@@ -11,17 +11,23 @@ import { backfillTimelines, resolveAccount, syncMatches } from '../sync.ts';
 import { renderShell } from './page.ts';
 import {
   abrirSesion,
+  alcanceDe,
   cerrarSesion,
   cobertura,
+  cuentaPorDefecto,
   dejarAtras,
   estado,
+  filtros,
   graficos,
   ledger,
   momentos,
+  partida,
+  partidas,
   pendientes,
   prep,
   RouteError,
   registrarCuenta,
+  resumen,
   type SyncEvento,
   sincronizar,
   taguear,
@@ -135,6 +141,20 @@ const str = (body: Record<string, unknown>, field: string): string => {
   return value;
 };
 
+/**
+ * The account a request with no `cuenta` gets.
+ *
+ * There is no sensible constant here — 'smurf' was one and it made the main account unreachable.
+ * `listAccounts` orders by game name, which would have handed the panel whichever account is
+ * alphabetically first: on his cache that is the main, with eleven games, over the smurf with
+ * seventy-five. The account he PLAYED last is the one he is coming to the panel about.
+ */
+const primeraCuenta = (db: Db): string => cuentaPorDefecto(db) ?? '';
+
+/** Narrows the query-string value to the union the route accepts, or null. */
+const resultadoDe = (raw: string | null): 'ganadas' | 'perdidas' | null =>
+  raw === 'ganadas' || raw === 'perdidas' ? raw : null;
+
 const numOrNull = (body: Record<string, unknown>, field: string): number | null => {
   const value = body[field];
   if (value === null || value === undefined) return null;
@@ -212,6 +232,13 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
       return;
     }
 
+    // The browser asks for this on every page load and it has no token, so the guard answered
+    // 403 and the console filled with failures that look like the panel is broken.
+    if (url.pathname === '/favicon.ico') {
+      response.writeHead(204).end();
+      return;
+    }
+
     // Pictures are served BEFORE the token check, and deliberately: they are Riot's public art,
     // they carry nothing about him, and keeping them token-free means the SVG that embeds the
     // minimap can be memoised across boots instead of being invalidated by every new token.
@@ -253,7 +280,20 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
       return;
     }
 
-    const cuenta = url.searchParams.get('cuenta') ?? 'smurf';
+    // The SCOPE, read once and passed down. The panel used to hardcode `cuenta=smurf` in its
+    // own JavaScript and `role: 'MIDDLE', queueId: 420` inside the routes, so the second account
+    // and every game outside mid soloq were unreachable from a page that never said so.
+    const cuenta = url.searchParams.get('cuenta') ?? primeraCuenta(db);
+    const alcance = alcanceDe({
+      cuenta,
+      rol: url.searchParams.get('rol'),
+      cola: url.searchParams.get('cola'),
+    });
+    const entero = (name: string, fallback: number): number => {
+      const raw = url.searchParams.get(name);
+      const value = raw === null ? fallback : Number(raw);
+      return Number.isInteger(value) && value > 0 ? value : fallback;
+    };
 
     if (url.pathname === '/') {
       html(response, renderShell(token));
@@ -318,11 +358,39 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
       return;
     }
     if (url.pathname === '/api/momentos') {
-      json(response, 200, momentos(db, cuenta));
+      json(response, 200, momentos(db, alcance, entero('limite', 5)));
       return;
     }
     if (url.pathname === '/api/graficos') {
-      json(response, 200, graficos(db, cuenta));
+      json(response, 200, graficos(db, alcance));
+      return;
+    }
+    if (url.pathname === '/api/filtros') {
+      json(response, 200, filtros(db, cuenta));
+      return;
+    }
+    if (url.pathname === '/api/resumen') {
+      json(response, 200, resumen(db, alcance, { forma: entero('forma', 20) }));
+      return;
+    }
+    if (url.pathname === '/api/partidas') {
+      json(
+        response,
+        200,
+        partidas(db, alcance, {
+          campeon: url.searchParams.get('campeon'),
+          rival: url.searchParams.get('rival'),
+          resultado: resultadoDe(url.searchParams.get('resultado')),
+          tag: url.searchParams.get('tag'),
+          limite: entero('limite', 25),
+        }),
+      );
+      return;
+    }
+    if (url.pathname === '/api/partida') {
+      const id = url.searchParams.get('id');
+      if (id === null) throw new RouteError(400, "falta 'id'");
+      json(response, 200, partida(db, cuenta, id));
       return;
     }
     if (url.pathname === '/api/cobertura') {

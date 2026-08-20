@@ -57,10 +57,32 @@ Cuando terminás de jugar, **doble click a `lol-ui.bat`**. Desde la terminal es 
 El acceso directo del escritorio ya está hecho y apunta acá; si alguna vez hay que rehacerlo,
 el icono es `assets/lol-lab.ico` y el destino es este `.bat` con el repo como carpeta de inicio.
 
-Abre el panel en el navegador y a partir de ahí no volvés a la terminal. Arriba te dice **qué
-hacer ahora** y por qué; abajo están el botón de sincronizar con su barra de progreso, las
-partidas sin taguear con tres botones cada una, los momentos más caros, la curva, el mapa de
-muertes, la cobertura y el ledger.
+Abre el panel en el navegador y a partir de ahí no volvés a la terminal.
+
+Arriba de todo elegís **cuenta, rol y cola**: todo lo de abajo se lee con ese filtro y queda en la
+URL, así que si recargás caés donde estabas. Debajo, una sola tarjeta dice **qué hacer ahora** y
+trae el botón que lo hace.
+
+El resto son **secciones plegadas**, y se pliegan a propósito: una pantalla con todo abierto es un
+informe, no algo que se usa a las dos de la mañana después de jugar. Cada título lleva el número
+adentro — *Taguear 45*, *key falta* — así que cerrada no significa a ciegas, y ninguna sección
+calcula nada hasta que la abrís. Se acuerdan de cómo las dejaste.
+
+| Sección | Qué hay |
+|---|---|
+| **Cómo viene** | winrate con su n, la tira de las últimas 20 (V/D, la más nueva a la derecha), la racha, lo de hoy, y las métricas causales contra tu rival de línea. Adentro, el desglose por campeón. |
+| **Taguear** | las partidas sin taguear, tres botones cada una. Teclas `1` `2` `3`. Se abre sola si hay algo pendiente. |
+| **Sincronizar** | el botón con su barra, en dos fases: partidas nuevas y después timelines viejos. |
+| **Partidas** | la lista completa, filtrable por campeón, resultado, tag y rival. Cada fila se despliega con TODO lo derivable de esa partida: curva de oro, fases, peleas, muertes, épicos, tempo, roams, build con íconos y los momentos más caros. |
+| **Lo que salió caro** | las últimas cinco, con la build y los tres momentos de cada una. |
+| **Curva y mapa** | la curva de oro de la última partida medible y el mapa de muertes sobre el minimapa real. |
+| **Antes de entrar** | el matchup: tu récord acá, tus reps en todas las cuentas, el meta de op.gg. |
+| **De qué no puedo hablar** | la cobertura, con buscador. |
+| **Hipótesis** | el ledger. |
+| **Cuentas y key** | rango por cola, pendientes, dejadas atrás, sin timeline, último sync, y el estado de la key. |
+
+Atajos: `1` `2` `3` taguear · `s` sincronizar · `p` partidas · `e` expandir todo, `E` contraer ·
+`?` la ayuda. Nada que no se pueda hacer con el mouse.
 
 El **tag** es lo único que el software no puede sacar solo, y es lo que separa "jugué mal" de
 "me tocó mal". Cada click se guarda en el momento: si cerrás la pestaña a la mitad, lo que ya

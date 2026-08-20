@@ -3,114 +3,273 @@
  *
  * No framework and no build step, consistent with ADR-003 and with ADR-014's reasoning for the
  * static page — a panel with buttons over a local JSON API is not a thing that needs a bundler.
- * The document is a SHELL: it ships no data, and everything it shows comes from `/api/*`, so
+ * The document is a SHELL: it ships no data, and everything it shows comes from /api/*, so
  * there is exactly one place where each number is produced.
+ *
+ * The layout is PROGRESSIVE DISCLOSURE and that is a decision, not a style (ADR-024). One card
+ * says what to do now; everything else is a collapsed section that renders the first time it is
+ * opened. The panel used to paint nine sections at once — the whole engine at full volume, which
+ * is the shape of a report and not of a thing you use after playing at two in the morning.
  */
 
 import { SVG_STYLE, SVG_VARS_DARK } from '../analysis/render.ts';
-
-function esc(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 /** Exported so a test can assert it carries the rules the SVG builders need. */
 export const CLIENT_STYLE = `
 :root {
   color-scheme: dark;
-  --bg: #0f1115;
-  --card: #171a21;
+  --bg: #0d0f14;
+  --card: #161922;
+  --card-2: #1c2029;
   --line: #262b36;
+  --line-soft: #1f242e;
   --ink: #e8eaf0;
-  --dim: #9aa3b2;
+  --dim: #98a1b0;
+  --faint: #6b7482;
   --ok: #5ec27a;
   --warn: #e0b450;
   --bad: #e06c6c;
+  --accent: #6ea8fe;
+  --r-sm: 6px;
+  --r: 10px;
+  --r-lg: 14px;
+  --gap: 10px;
 }
 * { box-sizing: border-box; }
 body {
-  margin: 0; padding: 24px;
+  margin: 0; padding: 0 20px 80px;
   background: var(--bg); color: var(--ink);
-  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
-h1 { font-size: 20px; margin: 0 0 4px; }
-h2 { font-size: 15px; margin: 28px 0 10px; color: var(--dim); font-weight: 600;
-     text-transform: uppercase; letter-spacing: .06em; }
-.wrap { max-width: 900px; margin: 0 auto; }
-.sub { color: var(--dim); margin: 0 0 24px; font-size: 13px; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-        padding: 14px 16px; margin-bottom: 10px; }
-.accion { display: flex; gap: 14px; align-items: flex-start; }
-.accion .txt { flex: 1; min-width: 0; }
-.accion .que { font-weight: 600; }
-.accion .porque { color: var(--dim); font-size: 13px; margin-top: 2px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 7px; flex: none; }
-.dot.ahora { background: var(--bad); }
-.dot.cuando_puedas { background: var(--warn); }
-.ok { color: var(--ok); }
+.wrap { max-width: 980px; margin: 0 auto; }
+h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; }
+h3 { font-size: 13px; margin: 16px 0 8px; color: var(--dim); font-weight: 600;
+     text-transform: uppercase; letter-spacing: .07em; }
+.sub { color: var(--faint); font-size: 12px; margin: 0; }
 .dim { color: var(--dim); }
+.faint { color: var(--faint); }
+.ok { color: var(--ok); }
+.bad { color: var(--bad); }
+.warn { color: var(--warn); }
+.nums { font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- barra superior
+   Sticky because the scope selectors live in it: the reader must always be able to see
+   WHICH account and role every number below is about, without scrolling back up. */
+.top { position: sticky; top: 0; z-index: 20; background: var(--bg);
+       padding: 14px 0 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line-soft); }
+.top .fila { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.top .marca { display: flex; flex-direction: column; margin-right: auto; }
+.scope { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.scope .sep { color: var(--line); }
+
+/* Chips: the account switcher and every filter. A button that looks like what it is. */
+.chip { font: inherit; font-size: 13px; color: var(--dim); background: transparent;
+        border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px;
+        cursor: pointer; white-space: nowrap; }
+.chip:hover { background: var(--card-2); color: var(--ink); }
+.chip[aria-pressed="true"] { background: #24304a; border-color: var(--accent); color: #cfe0ff; }
+.chip .n { color: var(--faint); font-size: 11px; margin-left: 5px; }
+
+select {
+  font: inherit; font-size: 13px; color: var(--dim); background: var(--card);
+  border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; cursor: pointer;
+}
+select:hover { color: var(--ink); }
+
+/* --------------------------------------------------------------------- tarjetas */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r);
+        padding: 14px 16px; margin-bottom: var(--gap); }
+.card.plano { background: transparent; border-color: var(--line-soft); }
+.err { border-color: var(--bad); }
+
+/* ------------------------------------------------------------------- lo de ahora
+   The one card that is never collapsed. Everything else on the page is a detail; this is
+   the answer to the only question the panel exists to answer. */
+.destacada { display: flex; gap: 14px; align-items: flex-start;
+         background: linear-gradient(180deg, #1b2030, var(--card));
+         border: 1px solid #2c3446; border-radius: var(--r-lg); padding: 16px 18px;
+         margin-bottom: 14px; }
+.destacada .txt { flex: 1; min-width: 0; }
+.destacada .que { font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+.destacada .porque { color: var(--dim); font-size: 13px; margin-top: 4px; }
+.destacada .marca { font-size: 11px; font-weight: 700; letter-spacing: .08em;
+                text-transform: uppercase; padding: 3px 8px; border-radius: var(--r-sm);
+                flex: none; margin-top: 2px; }
+.destacada .marca.urg-ahora { background: #3a1f22; color: #ffb3b3; }
+.destacada .marca.urg-cuando_puedas { background: #392f19; color: #ffdf9e; }
+.destacada .acciones { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.otras { display: flex; flex-direction: column; gap: 4px; margin: -4px 0 14px; padding-left: 2px; }
+.otras .otra { color: var(--dim); font-size: 13px; display: flex; gap: 9px; align-items: center; }
+.otras .punto { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.punto.urg-ahora { background: var(--bad); }
+.punto.urg-cuando_puedas { background: var(--warn); }
+
+/* -------------------------------------------------------------------- colapsables
+   A native <details> on purpose: it is keyboard-accessible, it survives with JavaScript off, and
+   the browser already knows how to animate it. The badge in the summary is what makes a
+   closed section honest — collapsed must not mean blind. */
+details.seccion { border: 1px solid var(--line); border-radius: var(--r);
+                  background: var(--card); margin-bottom: var(--gap); overflow: hidden; }
+details.seccion > summary {
+  list-style: none; cursor: pointer; padding: 12px 16px;
+  display: flex; align-items: center; gap: 10px; user-select: none;
+}
+details.seccion > summary::-webkit-details-marker { display: none; }
+details.seccion > summary:hover { background: var(--card-2); }
+details.seccion > summary .titulo { font-weight: 600; font-size: 14px; }
+details.seccion > summary .resumen { color: var(--faint); font-size: 12px; margin-left: auto;
+                                     text-align: right; }
+details.seccion > summary .flecha { color: var(--faint); transition: transform .15s;
+                                    font-size: 11px; width: 10px; }
+details.seccion[open] > summary .flecha { transform: rotate(90deg); }
+details.seccion[open] > summary { border-bottom: 1px solid var(--line-soft); }
+.cuerpo { padding: 14px 16px 16px; }
+.badge { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 8px;
+         background: var(--card-2); color: var(--dim); border: 1px solid var(--line); }
+.badge.urgente { background: #3a1f22; color: #ffb3b3; border-color: #5a2f33; }
+.badge.bien { background: #1e2f24; color: #a8e0ba; border-color: #2e4a37; }
+
+/* ------------------------------------------------------------------- stat tiles */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.tile { background: var(--card-2); border: 1px solid var(--line-soft); border-radius: var(--r);
+        padding: 10px 12px; }
+.tile .k { color: var(--faint); font-size: 11px; text-transform: uppercase;
+           letter-spacing: .06em; display: block; margin-bottom: 4px; }
+.tile .v { font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
+.tile .d { font-size: 12px; margin-left: 6px; font-variant-numeric: tabular-nums; }
+.tile .vs { color: var(--faint); font-size: 11px; margin-top: 2px; }
+/* The hero: exactly one per view. Proportional figures, not tabular — at this size
+   tabular digits make a three-digit number look loose. */
+.hero { font-size: 46px; font-weight: 650; letter-spacing: -.03em; line-height: 1.05; }
+.hero-fila { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+
+/* ------------------------------------------------------------- tira de forma W/L
+   Colour is NOT the encoding here: every block carries its letter. Green and yellow sit
+   4.7 apart under protanopia in this palette, so a status colour never travels alone. */
+.forma { display: flex; gap: 3px; flex-wrap: wrap; margin: 4px 0 2px; }
+.forma .g { width: 22px; height: 26px; border-radius: 5px; display: grid; place-items: center;
+            font-size: 11px; font-weight: 700; border: 1px solid; cursor: pointer;
+            background: transparent; padding: 0; font-family: inherit; }
+.forma .g.v { color: var(--ok); border-color: #2f5f3d; background: #17281d; }
+.forma .g.d { color: var(--bad); border-color: #5f3030; background: #281818; }
+.forma .g:hover { outline: 1px solid var(--accent); }
+.racha { font-size: 13px; }
+
+/* ------------------------------------------------------------------- lista/tabla */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: var(--faint); font-weight: 600; padding: 4px 8px 6px 0;
+     font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+td { padding: 5px 8px 5px 0; border-top: 1px solid var(--line-soft); }
+/* The first column takes the slack. Without this a six-column table of short values spreads
+   every number to the far edge of the card and the row stops reading as one thing. */
+th:not(:first-child), td:not(:first-child) { width: 1%; white-space: nowrap; }
 .row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
 .row .k { color: var(--dim); }
-code { background: #0b0d11; padding: 1px 6px; border-radius: 4px; font-size: 13px; }
-.err { border-color: var(--bad); color: var(--bad); }
+.hint { color: var(--faint); font-size: 12px; margin: 0 0 10px; }
+.alcance { color: var(--faint); font-size: 12px; margin-top: 10px; }
+.vacio { color: var(--faint); font-size: 13px; padding: 6px 0; }
+
+/* --------------------------------------------------------------------- partidas */
+.plista { display: flex; flex-direction: column; gap: 6px; }
+details.pfila { border: 1px solid var(--line-soft); border-radius: var(--r-sm);
+                background: var(--card-2); }
+details.pfila > summary { list-style: none; cursor: pointer; padding: 8px 10px;
+                          display: flex; align-items: center; gap: 10px; }
+details.pfila > summary::-webkit-details-marker { display: none; }
+details.pfila > summary:hover { background: #232833; }
+details.pfila[open] > summary { border-bottom: 1px solid var(--line-soft); }
+.pfila .quien { flex: 1; min-width: 0; }
+.pfila .cuando { color: var(--faint); font-size: 12px; white-space: nowrap; }
+.pdetalle { padding: 12px 12px 14px; display: grid; gap: 12px; }
+.bloque { border-top: 1px solid var(--line-soft); padding-top: 10px; }
+.bloque:first-child { border-top: 0; padding-top: 0; }
+.bloque .t { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+             color: var(--faint); margin-bottom: 6px; }
+.curva-tabla { display: flex; gap: 14px; flex-wrap: wrap; font-variant-numeric: tabular-nums;
+               font-size: 13px; }
+.curva-tabla .p { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.curva-tabla .p .m { color: var(--faint); font-size: 11px; }
+
+/* ----------------------------------------------------------------------- varios */
+.derrota { color: var(--bad); }
+.victoria { color: var(--ok); }
+.pill { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; font-weight: 600;
+        border-radius: 999px; padding: 2px 9px; border: 1px solid currentColor; }
+code, kbd { background: #0b0d11; padding: 1px 6px; border-radius: 4px; font-size: 12px;
+            border: 1px solid var(--line); font-family: ui-monospace, SFMono-Regular, monospace; }
+kbd { color: var(--dim); }
 button {
-  font: inherit; color: var(--ink); background: #202634;
+  font: inherit; color: var(--ink); background: #212736;
   border: 1px solid var(--line); border-radius: 7px;
   padding: 6px 12px; cursor: pointer;
 }
 button:hover { background: #2a3242; }
-button:disabled { opacity: .45; cursor: default; }
+button:disabled { opacity: .4; cursor: default; }
 button.on { background: #2f4d38; border-color: var(--ok); }
-.partida { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.partida .quien { flex: 1; min-width: 180px; }
-.partida .cuando { color: var(--dim); font-size: 13px; }
-.derrota { color: var(--bad); }
-.victoria { color: var(--ok); }
-.tags { display: flex; gap: 6px; }
-.hint { color: var(--dim); font-size: 13px; margin: 0 0 10px; }
+button.principal { background: #2a3a5c; border-color: #3d5384; color: #d6e4ff; }
+button.principal:hover { background: #33456b; }
+button.chico { padding: 3px 9px; font-size: 12px; }
+input { font: inherit; color: var(--ink); background: #0b0d11; border: 1px solid var(--line);
+        border-radius: 7px; padding: 6px 10px; width: 150px; }
+input:focus, select:focus, button:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
 .barra { height: 6px; background: #0b0d11; border-radius: 3px; overflow: hidden; margin-top: 10px; }
 .barra > div { height: 100%; background: var(--ok); width: 0; transition: width .2s; }
 .log { color: var(--dim); font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
-/* Champion portraits. Square art, rounded, with a ring that says who won. */
 .face { width: 34px; height: 34px; border-radius: 8px; flex: none; background: #0b0d11;
         border: 1px solid var(--line); object-fit: cover; }
 .face.chico { width: 24px; height: 24px; border-radius: 6px; }
-.face.gano { border-color: var(--ok); }
-.face.perdio { border-color: var(--bad); }
+.face.gano { border-color: #2f5f3d; }
+.face.perdio { border-color: #5f3030; }
 .duelo { display: flex; align-items: center; gap: 8px; }
-.duelo .vs { color: var(--dim); font-size: 12px; }
-.cabeza { display: flex; align-items: center; gap: 10px; margin-bottom: 2px; }
+.duelo .vs { color: var(--faint); font-size: 12px; }
+.cabeza { display: flex; align-items: center; gap: 10px; }
 .cabeza .nombres { font-weight: 600; }
-.pill { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; font-weight: 600;
-        border-radius: 999px; padding: 2px 9px; border: 1px solid currentColor; }
-.momento { font-variant-numeric: tabular-nums; padding: 3px 0; }
+.momento { font-variant-numeric: tabular-nums; padding: 3px 0; font-size: 13px; }
 .momento .min { color: var(--warn); }
-/* The build: two rows of item icons with the minute under each, his and his opponent's. */
-.build { display: grid; grid-template-columns: 3.6em 1fr; gap: 6px 10px; margin: 10px 0 4px;
+.build { display: grid; grid-template-columns: 3.6em 1fr; gap: 6px 10px; margin: 6px 0 2px;
          align-items: center; font-variant-numeric: tabular-nums; font-size: 12px; }
-.build .k { color: var(--dim); font-size: 12px; }
+.build .k { color: var(--faint); font-size: 12px; }
 .items { display: flex; gap: 8px; flex-wrap: wrap; }
 .item { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 44px; }
 .item img { width: 40px; height: 40px; border-radius: 7px; border: 1px solid var(--line);
             background: #0b0d11; }
-.item .min { color: var(--dim); font-size: 11px; }
+.item .min { color: var(--faint); font-size: 11px; }
 .item.tarde img { border-color: var(--warn); }
-.tag { font-size: 12px; color: var(--dim); border: 1px solid var(--line);
-       border-radius: 5px; padding: 1px 6px; margin-left: 8px; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; color: var(--dim); font-weight: 600; padding: 4px 8px 4px 0; }
-td { padding: 3px 8px 3px 0; border-top: 1px solid var(--line); }
-.alcance { color: var(--dim); font-size: 12px; margin-top: 8px; }
-input { font: inherit; color: var(--ink); background: #0b0d11; border: 1px solid var(--line);
-        border-radius: 7px; padding: 6px 10px; width: 150px; }
+.tag { font-size: 11px; color: var(--dim); border: 1px solid var(--line);
+       border-radius: 5px; padding: 1px 6px; }
+.tags { display: flex; gap: 6px; }
+.partida { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.partida .quien { flex: 1; min-width: 180px; }
+.partida .cuando { color: var(--faint); font-size: 12px; }
 .svgbox { overflow-x: auto; }
+.filtros { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
 
+/* ------------------------------------------------------------------------ avisos
+   A stack of toasts instead of one shared error line: five sections failing used to write
+   over each other, so the last message won and the other four vanished. */
+.avisos { position: fixed; right: 16px; bottom: 16px; z-index: 100;
+          display: flex; flex-direction: column; gap: 8px; max-width: 380px; }
+.aviso { background: var(--card-2); border: 1px solid var(--line); border-left-width: 3px;
+         border-radius: var(--r-sm); padding: 9px 12px; font-size: 13px;
+         box-shadow: 0 8px 24px rgba(0,0,0,.45); animation: entra .18s ease-out; }
+.aviso.mal { border-left-color: var(--bad); }
+.aviso.bien { border-left-color: var(--ok); }
+.aviso.info { border-left-color: var(--accent); }
+.aviso .x { float: right; color: var(--faint); cursor: pointer; margin-left: 10px; }
+@keyframes entra { from { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { .aviso { animation: none; }
+  details.seccion > summary .flecha { transition: none; } }
+
+/* ------------------------------------------------------------------------ ayuda */
+.teclas { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px; }
+.teclas kbd { justify-self: start; }
 /* The SVG builders carry no presentation of their own - they emit classes. Pulled in from
    render.ts rather than restated, so the static page and this one cannot drift apart, and an
-   SVG here cannot silently render as black-on-black the way it did before. */
+   SVG here cannot silently render as black-on-black the way it did before (G-023). */
 ${SVG_VARS_DARK}
 ${SVG_STYLE}
 `;
@@ -119,18 +278,72 @@ ${SVG_STYLE}
  * The client script, exported ONLY so a test can parse it.
  *
  * It lives inside a template literal, which means a syntax error in it is invisible to tsc, to
- * Biome and to Vitest alike — the page would simply do nothing, with a clean build and a clean
- * suite. `tests/ui.test.ts` compiles it with `new Function` for exactly that reason. Same class
- * of blind spot G-018 was born from: the verify chain does not look inside strings.
+ * Biome and to Vitest: the page would load, do nothing, and every check would stay green
+ * (G-022). It also carries NO raw backtick — one inside a comment ended this literal three
+ * hundred lines early and what spilled out happened to be invalid TypeScript, which is luck and
+ * not a check, so the byte is banned and a test asserts it (G-034).
  */
 export const CLIENT_SCRIPT = `
 const TOKEN = new URLSearchParams(location.search).get('t');
-const api = (path) => fetch(path + (path.includes('?') ? '&' : '?') + 't=' + TOKEN)
-  .then(async (r) => {
+
+/* ------------------------------------------------------------------- el alcance
+   Which account, role and queue everything on the page is about. It used to be the string
+   'smurf' written into this file, which made the second account unreachable and every game
+   outside mid soloq invisible. It lives in the URL so a reload keeps it and so a particular
+   view can be shared by copying the address bar. */
+const ALCANCE = {
+  cuenta: new URLSearchParams(location.search).get('cuenta') || null,
+  rol: new URLSearchParams(location.search).get('rol') || null,
+  cola: new URLSearchParams(location.search).get('cola') || null,
+};
+
+function qs(extra) {
+  const p = new URLSearchParams();
+  p.set('t', TOKEN);
+  if (ALCANCE.cuenta) p.set('cuenta', ALCANCE.cuenta);
+  if (ALCANCE.rol) p.set('rol', ALCANCE.rol);
+  if (ALCANCE.cola) p.set('cola', ALCANCE.cola);
+  for (const k in extra || {}) {
+    if (extra[k] !== null && extra[k] !== undefined && extra[k] !== '') p.set(k, extra[k]);
+  }
+  return p.toString();
+}
+
+/* Writes the scope into the address bar without reloading, so a refresh lands where he was. */
+function guardarAlcance() {
+  const p = new URLSearchParams();
+  p.set('t', TOKEN);
+  if (ALCANCE.cuenta) p.set('cuenta', ALCANCE.cuenta);
+  if (ALCANCE.rol) p.set('rol', ALCANCE.rol);
+  if (ALCANCE.cola) p.set('cola', ALCANCE.cola);
+  history.replaceState(null, '', location.pathname + '?' + p.toString());
+}
+
+const api = (path, extra) =>
+  fetch(path + '?' + qs(extra)).then(async (r) => {
     const body = await r.json();
     if (!r.ok) throw new Error(body.error || r.statusText);
     return body;
   });
+
+const post = (path, body) =>
+  fetch(path + '?' + qs(), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  }).then(async (r) => {
+    const parsed = await r.json();
+    if (!r.ok) throw new Error(parsed.error || r.statusText);
+    return parsed;
+  });
+
+/* --------------------------------------------------------------------- elementos */
+const el = (tag, cls, text) => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+};
 
 /* A champion portrait, or nothing if the art is missing: the name is always in the text
    beside it, so a 404 has to degrade to plain text rather than to a broken-image icon. */
@@ -140,166 +353,731 @@ const cara = (campeon, cls) => {
   img.className = 'face' + (cls ? ' ' + cls : '');
   img.src = '/img/champion/' + encodeURIComponent(campeon) + '.png';
   img.alt = campeon;
-  img.title = campeon;
   img.loading = 'lazy';
   img.onerror = () => img.remove();
   return img;
 };
 
-const el = (tag, cls, text) => {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
+/* ----------------------------------------------------------------------- avisos
+   A stack, not a line. There used to be ONE #error element and five sections writing into
+   it, so whichever failed last was the only failure anyone saw. */
+function aviso(texto, clase) {
+  const box = document.getElementById('avisos');
+  const node = el('div', 'aviso ' + (clase || 'info'));
+  const x = el('span', 'x', '×');
+  x.onclick = () => node.remove();
+  node.append(x, document.createTextNode(texto));
+  box.append(node);
+  if (clase !== 'mal') setTimeout(() => node.remove(), 4500);
   return node;
-};
+}
+const fallar = (err) => aviso(err && err.message ? err.message : String(err), 'mal');
 
-function renderAcciones(acciones) {
-  const box = document.getElementById('acciones');
+/* ------------------------------------------------------------------- colapsables
+   Every section is a <details> that renders the FIRST time it is opened and remembers
+   whether it was open. Two reasons, and the second is the one that matters: the page used
+   to fire five fetches at load and paint everything at once, which is both slower than it
+   needs to be and more than anyone can read in one look. */
+const ABIERTAS = 'lol.abiertas';
+
+function leerAbiertas() {
+  try { return new Set(JSON.parse(localStorage.getItem(ABIERTAS) || '[]')); }
+  catch (e) { return new Set(); }
+}
+
+function recordarAbierta(id, abierta) {
+  const set = leerAbiertas();
+  if (abierta) set.add(id); else set.delete(id);
+  try { localStorage.setItem(ABIERTAS, JSON.stringify([...set])); } catch (e) { /* modo privado */ }
+}
+
+const SECCIONES = [];
+
+/**
+ * Builds one collapsible section.
+ *
+ * The resumir callback runs on every refresh and fills the badge, so a CLOSED section still says how
+ * much is inside it. That is the whole contract of collapsing something: hidden must not
+ * mean unknown.
+ */
+function seccion(id, titulo, render, opciones) {
+  const o = opciones || {};
+  const det = el('details', 'seccion');
+  det.id = 'sec-' + id;
+  const sum = el('summary');
+  const flecha = el('span', 'flecha', '▶');
+  const nombre = el('span', 'titulo', titulo);
+  const badge = el('span', 'badge');
+  badge.hidden = true;
+  const resumen = el('span', 'resumen');
+  sum.append(flecha, nombre, badge, resumen);
+  const cuerpo = el('div', 'cuerpo');
+  det.append(sum, cuerpo);
+
+  let pintada = false;
+  const pintar = async () => {
+    if (pintada) return;
+    pintada = true;
+    cuerpo.replaceChildren(el('div', 'vacio', 'cargando…'));
+    try {
+      cuerpo.replaceChildren();
+      await render(cuerpo);
+    } catch (err) {
+      pintada = false;
+      cuerpo.replaceChildren(el('div', 'vacio bad', 'No se pudo cargar: ' + err.message));
+      fallar(err);
+    }
+  };
+
+  det.ontoggle = () => {
+    recordarAbierta(id, det.open);
+    if (det.open) void pintar();
+  };
+
+  const entrada = {
+    id: id,
+    det: det,
+    cuerpo: cuerpo,
+    badge: badge,
+    resumen: resumen,
+    resumir: o.resumir || null,
+    redibujar: () => { pintada = false; if (det.open) void pintar(); },
+    abrir: () => { det.open = true; },
+  };
+  SECCIONES.push(entrada);
+  return entrada;
+}
+
+/** Re-runs every section's summary, and repaints the ones that are open. */
+async function refrescarSecciones(estado) {
+  for (const s of SECCIONES) {
+    if (s.resumir) {
+      try {
+        const r = s.resumir(estado);
+        if (r) {
+          s.badge.hidden = !r.badge;
+          if (r.badge) {
+            s.badge.textContent = r.badge;
+            s.badge.className = 'badge' + (r.tono ? ' ' + r.tono : '');
+          }
+          s.resumen.textContent = r.texto || '';
+        }
+      } catch (e) { /* a summary must never break the page */ }
+    }
+  }
+}
+
+/* -------------------------------------------------------------- la barra superior */
+function renderScope(f) {
+  const box = document.getElementById('scope');
   box.replaceChildren();
+
+  for (const c of f.cuentas) {
+    const chip = el('button', 'chip', c.label);
+    chip.setAttribute('aria-pressed', String(c.valor === ALCANCE.cuenta));
+    chip.onclick = () => {
+      if (c.valor === ALCANCE.cuenta) return;
+      ALCANCE.cuenta = c.valor;
+      // The role and queue belong to the account that was showing: he plays mid on one and
+      // whatever on the other, and carrying a filter across would show an empty page with no
+      // hint that the filter, not the cache, is what emptied it.
+      ALCANCE.rol = null;
+      ALCANCE.cola = null;
+      guardarAlcance();
+      void arrancar();
+    };
+    box.append(chip);
+  }
+
+  if (f.cuentas.length > 0) box.append(el('span', 'sep', '·'));
+
+  const selRol = el('select');
+  selRol.title = 'rol';
+  const todosR = el('option', null, 'todos los roles');
+  todosR.value = '';
+  selRol.append(todosR);
+  for (const r of f.roles) {
+    const o = el('option', null, r.label + ' (' + r.partidas + ')');
+    o.value = r.valor;
+    selRol.append(o);
+  }
+  selRol.value = ALCANCE.rol || '';
+  selRol.onchange = () => { ALCANCE.rol = selRol.value || null; guardarAlcance(); void arrancar(); };
+
+  const selCola = el('select');
+  selCola.title = 'cola';
+  const todasC = el('option', null, 'todas las colas');
+  todasC.value = '';
+  selCola.append(todasC);
+  for (const c of f.colas) {
+    const o = el('option', null, c.label + ' (' + c.partidas + ')');
+    o.value = String(c.valor);
+    selCola.append(o);
+  }
+  selCola.value = ALCANCE.cola || '';
+  selCola.onchange = () => { ALCANCE.cola = selCola.value || null; guardarAlcance(); void arrancar(); };
+
+  box.append(selRol, selCola);
+}
+
+/* ------------------------------------------------------------------ qué hacer ahora
+   ONE card, the most urgent thing, with the button that does it. The rest of the list goes
+   underneath in one line each: five equally-sized cards is a to-do list, and a to-do list
+   with five entries is not an answer to "qué hago ahora". */
+function renderAhora(acciones) {
+  const box = document.getElementById('ahora');
+  box.replaceChildren();
+
   if (acciones.length === 0) {
-    const card = el('div', 'card');
-    card.append(el('div', 'ok', 'Nada pendiente. Todo al día.'));
+    const card = el('div', 'destacada');
+    card.append(el('span', 'marca urg-cuando_puedas', 'al día'));
+    const txt = el('div', 'txt');
+    txt.append(el('div', 'que', 'Nada que hacer'));
+    txt.append(el('div', 'porque',
+      'Todo tagueado y sincronizado. Lo de abajo es para mirar, no para ejecutar.'));
+    card.append(txt);
     box.append(card);
     return;
   }
-  for (const a of acciones) {
-    const card = el('div', 'card accion');
-    card.append(el('div', 'dot ' + a.urgencia));
-    const txt = el('div', 'txt');
-    txt.append(el('div', 'que', a.que));
-    txt.append(el('div', 'porque', a.porque));
-    card.append(txt);
-    box.append(card);
-  }
-}
 
-function renderCuentas(cuentas) {
-  const box = document.getElementById('cuentas');
-  box.replaceChildren();
-  for (const c of cuentas) {
-    const card = el('div', 'card');
-    card.append(el('div', 'que', c.label));
-    const add = (k, v) => {
-      const row = el('div', 'row');
-      row.append(el('span', 'k', k));
-      row.append(el('span', null, v));
-      card.append(row);
-    };
-    add('sin taguear', String(c.pendientes));
-    // Stated, not hidden: the decision left these behind and the panel says how many, so the
-    // number never quietly becomes "there was nothing there".
-    if (c.dejadasAtras > 0) add('dejadas atrás', String(c.dejadasAtras) + ' (a propósito)');
-    // Same principle as the line above: a game with no timeline is missing from almost every
-    // number on this page, so the count is stated rather than left to be inferred from a gap.
-    if (c.sinTimeline > 0) add('sin timeline', String(c.sinTimeline) + ' (sin datos por minuto)');
-    add(
-      'último sync',
-      c.ultimoSync === null
-        ? 'nunca'
-        : new Date(c.ultimoSync.at).toLocaleString('es-AR', { hourCycle: 'h23' }) +
-            (c.ultimoSync.terminado ? '' : ' (no terminó)') +
-            (c.ultimoSync.error ? ' — ' + c.ultimoSync.error : ''),
-    );
-    for (const r of c.rango) {
-      add(r.cola, r.texto + (r.wins === null ? '' : ' (' + r.wins + 'W-' + r.losses + 'L)'));
-    }
-    box.append(card);
-  }
-}
+  const [primera, ...resto] = acciones;
+  const card = el('div', 'destacada');
+  card.append(el('span', 'marca urg-' + primera.urgencia,
+    primera.urgencia === 'ahora' ? 'ahora' : 'cuando puedas'));
+  const txt = el('div', 'txt');
+  txt.append(el('div', 'que', primera.que));
+  txt.append(el('div', 'porque', primera.porque));
 
-function renderKey(key) {
-  const box = document.getElementById('key');
-  box.replaceChildren();
-  const card = el('div', 'card' + (key.problema ? ' err' : ''));
-  if (!key.presente) {
-    card.append(el('div', null, 'No hay key.'));
-  } else {
-    const horas = key.horasDesdeQueSePego;
-    card.append(
-      el(
-        'div',
-        key.probablementeVencida ? null : 'ok',
-        'Key ' + key.tipo + (horas === null ? '' : ' — pegada hace ' + Math.floor(horas) + ' h'),
-      ),
-    );
+  const acts = el('div', 'acciones');
+  const botones = {
+    taguear: ['Ir a taguear', () => abrirSeccion('taguear')],
+    sync: ['Sincronizar ahora', () => { abrirSeccion('sync'); lanzarSync(); }],
+    backfill: ['Sincronizar (repara timelines)', () => { abrirSeccion('sync'); lanzarSync(); }],
+    key: ['Ver la key', () => abrirSeccion('cuentas')],
+    resolver_cuenta: ['Registrar cuenta', () => { document.getElementById('primera-vez').hidden = false; }],
+  };
+  const b = botones[primera.id];
+  if (b) {
+    const boton = el('button', 'principal', b[0]);
+    boton.onclick = b[1];
+    acts.append(boton);
   }
-  if (key.problema) card.append(el('div', 'porque', key.problema));
+  txt.append(acts);
+  card.append(txt);
   box.append(card);
+
+  if (resto.length > 0) {
+    const otras = el('div', 'otras');
+    for (const a of resto) {
+      const fila = el('div', 'otra');
+      fila.append(el('span', 'punto urg-' + a.urgencia));
+      fila.append(el('span', null, a.que));
+      otras.append(fila);
+    }
+    box.append(otras);
+  }
 }
 
-const post = (path, body) => fetch(path + (path.includes('?') ? '&' : '?') + 't=' + TOKEN, {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify(body || {}),
-}).then(async (r) => {
-  const parsed = await r.json();
-  if (!r.ok) throw new Error(parsed.error || r.statusText);
-  return parsed;
-});
+function abrirSeccion(id) {
+  const s = SECCIONES.find((x) => x.id === id);
+  if (!s) return;
+  s.abrir();
+  s.det.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 
+/* --------------------------------------------------------------------- el resumen
+   The one card that is open by default besides "ahora". Four numbers and a strip: enough
+   to know how it is going, not enough to have to read. */
+function fecha(ms) {
+  return new Date(ms).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' });
+}
+function fechaHora(ms) {
+  return new Date(ms).toLocaleString('es-AR', { hourCycle: 'h23', day: '2-digit',
+    month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+function reloj(segundos) {
+  const m = Math.floor(segundos / 60);
+  const s = segundos % 60;
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+async function renderResumen(box) {
+  const r = await api('/api/resumen');
+
+  if (r.jugadas === 0) {
+    box.append(el('div', 'vacio',
+      'No hay partidas con ese filtro. Probá con otro rol o cola, o sincronizá.'));
+    return;
+  }
+
+  /* The hero: the actual result, with its n beside it. It is not a proxy for anything, so
+     nothing about G-008 applies — but a rate without its denominator is a lie by omission. */
+  const fila = el('div', 'hero-fila');
+  const wr = el('div', 'hero nums', Math.round(r.winRate * 100) + '%');
+  fila.append(wr);
+  fila.append(el('div', 'dim', r.ganadas + 'V–' + (r.jugadas - r.ganadas) + 'D  ·  ' +
+    r.jugadas + ' partidas  ·  ' + r.alcance.rol + ', ' + r.alcance.cola));
+  box.append(fila);
+
+  /* The form strip. Every block carries its letter: colour never travels alone here. */
+  if (r.forma.length > 0) {
+    const tira = el('div', 'forma');
+    for (const g of r.forma) {
+      const b = el('button', 'g ' + (g.gano ? 'v' : 'd'), g.gano ? 'V' : 'D');
+      b.title = (g.gano ? 'Victoria' : 'Derrota') + ' · ' + g.campeon +
+        (g.rival ? ' vs ' + g.rival : '') + ' · ' + fechaHora(g.at) +
+        (g.tag ? ' · tag: ' + g.tag : '');
+      b.onclick = () => abrirPartida(g.matchId);
+      tira.append(b);
+    }
+    box.append(tira);
+    const pie = el('div', 'racha faint');
+    pie.textContent = 'últimas ' + r.forma.length + ', la más nueva a la derecha' +
+      (r.racha ? '  ·  racha: ' + r.racha.largo + ' ' +
+        (r.racha.tipo === 'V' ? 'victoria' : 'derrota') + (r.racha.largo === 1 ? '' : 's') +
+        ' seguida' + (r.racha.largo === 1 ? '' : 's') : '');
+    box.append(pie);
+  }
+
+  if (r.hoy.jugadas > 0) {
+    const hoy = el('div', 'card plano');
+    hoy.style.marginTop = '12px';
+    hoy.append(el('div', 't', 'hoy'));
+    hoy.append(el('div', null, r.hoy.jugadas + ' partida' + (r.hoy.jugadas === 1 ? '' : 's') +
+      ' · ' + r.hoy.ganadas + 'V–' + (r.hoy.jugadas - r.hoy.ganadas) + 'D' +
+      (r.hoy.sinTaguear > 0 ? ' · ' + r.hoy.sinTaguear + ' sin taguear' : ' · todas tagueadas')));
+    box.append(hoy);
+  }
+
+  if (r.tiles.length > 0) {
+    box.append(el('h3', null, 'contra tu rival de línea'));
+    const tiles = el('div', 'tiles');
+    for (const t of r.tiles) {
+      const tile = el('div', 'tile');
+      tile.title = t.nota;
+      tile.append(el('span', 'k', t.label));
+      const v = el('div');
+      v.append(el('span', 'v nums', t.valor.toFixed(t.decimales)));
+      if (t.delta !== null) {
+        const bueno = t.masEsMejor ? t.delta > 0 : t.delta < 0;
+        const cero = t.delta === 0;
+        const d = el('span', 'd ' + (cero ? 'faint' : bueno ? 'ok' : 'bad'));
+        /* An arrow beside the sign, so the good/bad reading is never colour alone. */
+        d.textContent = (cero ? '=' : bueno ? '▲' : '▼') + ' ' +
+          (t.delta > 0 ? '+' : '') + t.delta.toFixed(t.decimales);
+        v.append(d);
+      }
+      tile.append(v);
+      tile.append(el('div', 'vs', t.rival === null ? 'sin rival medido'
+        : 'rival ' + t.rival.toFixed(t.decimales)));
+      tiles.append(tile);
+    }
+    box.append(tiles);
+    box.append(el('div', 'alcance',
+      'Sólo métricas medibles ANTES de que el resultado esté decidido. Las que suben porque ' +
+      'vas ganando (KDA, CS/min, daño, visión) no tienen tarjeta acá a propósito.'));
+  }
+
+  if (r.porCampeon.length > 1) {
+    // Folded one level deeper on purpose: it is a table, and a table is the thing that turns a
+    // card you glance at into a page you have to read.
+    const det = el('details');
+    const sum = el('summary', 'hint');
+    sum.style.cursor = 'pointer';
+    sum.textContent = 'ver por campeón (' + r.porCampeon.length + ')';
+    det.append(sum);
+    const tabla = document.createElement('table');
+    const head = document.createElement('tr');
+    for (const h of ['campeón', 'partidas', 'ganadas', 'cs@10', 'rival', 'dif']) {
+      const th = document.createElement('th');
+      th.textContent = h;
+      head.append(th);
+    }
+    tabla.append(head);
+    for (const c of r.porCampeon) {
+      const tr = document.createElement('tr');
+      const dif = c.csDiez === null || c.csDiezRival === null ? null : c.csDiez - c.csDiezRival;
+      const celdas = [
+        c.campeon,
+        String(c.jugadas),
+        c.ganadas + '/' + c.jugadas,
+        c.csDiez === null ? '—' : c.csDiez.toFixed(1),
+        c.csDiezRival === null ? '—' : c.csDiezRival.toFixed(1),
+        dif === null ? '—' : (dif > 0 ? '+' : '') + dif.toFixed(1),
+      ];
+      celdas.forEach((valor, i) => {
+        const td = document.createElement('td');
+        td.textContent = valor;
+        if (i >= 1) td.className = 'nums';
+        if (i === 5 && dif !== null && dif !== 0) td.classList.add(dif > 0 ? 'ok' : 'bad');
+        tr.append(td);
+      });
+      tabla.append(tr);
+    }
+    det.append(tabla);
+    // The denominator is the whole point of the table: a 3/4 on one champion is not a finding.
+    det.append(el('div', 'alcance',
+      'Un récord de cinco partidas es una moneda con nombre. La columna de partidas está para ' +
+      'que eso se lea solo, y nada de acá está rankeado como fuerte o flojo.'));
+    box.append(det);
+  }
+}
+
+/* -------------------------------------------------------------------- las partidas
+   A browsable list with filters, which the panel simply did not have: everything it showed
+   was a top-N of something, so "cómo me fue con Diana contra Zed" had no way to be asked.
+   Each row expands into the full derivation, fetched only when it is opened — nine analyses
+   over a raw timeline is 20-40 ms that nobody should pay for forty rows they are not
+   reading. */
+const FILTRO = { campeon: '', rival: '', resultado: '', tag: '', limite: 25 };
+let CAMPEONES = [];
+
+function abrirPartida(matchId) {
+  const s = SECCIONES.find((x) => x.id === 'partidas');
+  if (!s) return;
+  s.abrir();
+  s.det.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Wait for the section to have painted its list before reaching into it.
+  setTimeout(() => {
+    const fila = document.getElementById('p-' + matchId);
+    if (fila) { fila.open = true; fila.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  }, 250);
+}
+
+async function renderPartidas(box) {
+  const filtros = el('div', 'filtros');
+
+  const selCampeon = el('select');
+  selCampeon.title = 'tu campeón';
+  const todosCampeones = el('option', null, 'todos tus campeones');
+  todosCampeones.value = '';
+  selCampeon.append(todosCampeones);
+  for (const c of CAMPEONES) {
+    const o = el('option', null, c.valor + ' (' + c.partidas + ')');
+    o.value = c.valor;
+    selCampeon.append(o);
+  }
+  selCampeon.value = FILTRO.campeon;
+
+  const selResultado = el('select');
+  for (const [valor, label] of [['', 'ganadas y perdidas'], ['ganadas', 'sólo ganadas'],
+                                ['perdidas', 'sólo perdidas']]) {
+    const o = el('option', null, label);
+    o.value = valor;
+    selResultado.append(o);
+  }
+  selResultado.value = FILTRO.resultado;
+
+  const selTag = el('select');
+  for (const [valor, label] of [['', 'con y sin tag'], ['sin', 'sin taguear'],
+                                ['mía', 'tag: la produje yo'], ['igual', 'tag: salía igual'],
+                                ['pareja', 'tag: estuvo pareja']]) {
+    const o = el('option', null, label);
+    o.value = valor;
+    selTag.append(o);
+  }
+  selTag.value = FILTRO.tag;
+
+  const inRival = el('input');
+  inRival.placeholder = 'rival (ej. Zed)';
+  inRival.value = FILTRO.rival;
+  inRival.size = 12;
+
+  const lista = el('div', 'plista');
+
+  const recargar = async () => {
+    FILTRO.campeon = selCampeon.value;
+    FILTRO.resultado = selResultado.value;
+    FILTRO.tag = selTag.value;
+    FILTRO.rival = inRival.value.trim();
+    lista.replaceChildren(el('div', 'vacio', 'buscando…'));
+    try {
+      const filas = await api('/api/partidas', {
+        campeon: FILTRO.campeon, resultado: FILTRO.resultado,
+        tag: FILTRO.tag, rival: FILTRO.rival, limite: FILTRO.limite,
+      });
+      pintarFilas(lista, filas);
+    } catch (err) {
+      lista.replaceChildren(el('div', 'vacio', 'No se pudo buscar: ' + err.message));
+    }
+  };
+
+  selCampeon.onchange = recargar;
+  selResultado.onchange = recargar;
+  selTag.onchange = recargar;
+  inRival.onchange = recargar;
+  inRival.onkeydown = (e) => { if (e.key === 'Enter') void recargar(); };
+
+  const limpiar = el('button', 'chico', 'limpiar');
+  limpiar.onclick = () => {
+    selCampeon.value = ''; selResultado.value = ''; selTag.value = ''; inRival.value = '';
+    void recargar();
+  };
+
+  const mas = el('button', 'chico', 'ver más');
+  mas.onclick = () => { FILTRO.limite = Math.min(FILTRO.limite + 25, 200); void recargar(); };
+
+  filtros.append(selCampeon, selResultado, selTag, inRival, limpiar, mas);
+  box.append(filtros, lista);
+  await recargar();
+}
+
+function pintarFilas(lista, filas) {
+  lista.replaceChildren();
+  if (filas.length === 0) {
+    lista.append(el('div', 'vacio', 'Ninguna partida con esos filtros.'));
+    return;
+  }
+  for (const p of filas) lista.append(filaPartida(p));
+  lista.append(el('div', 'alcance', filas.length + ' partida' + (filas.length === 1 ? '' : 's') +
+    ' — el detalle de cada una se calcula al abrirla.'));
+}
+
+function filaPartida(p) {
+  const det = el('details', 'pfila');
+  det.id = 'p-' + p.matchId;
+  const sum = el('summary');
+
+  const duelo = el('div', 'duelo');
+  const c1 = cara(p.campeon, 'chico ' + (p.gano ? 'gano' : 'perdio'));
+  if (c1) duelo.append(c1);
+  if (p.rival) {
+    duelo.append(el('span', 'vs', 'vs'));
+    const c2 = cara(p.rival, 'chico');
+    if (c2) duelo.append(c2);
+  }
+
+  const quien = el('div', 'quien');
+  quien.append(el('span', p.gano ? 'victoria' : 'derrota', p.gano ? 'V' : 'D'));
+  quien.append(document.createTextNode('  ' + p.campeon + (p.rival ? ' vs ' + p.rival : '')));
+  const meta = el('div', 'cuando');
+  meta.textContent = p.kda + ' · ' + reloj(p.duracion) + ' · ' + p.rol + ' · ' + p.cola +
+    (p.sinTimeline ? ' · SIN TIMELINE' : '');
+  quien.append(meta);
+
+  sum.append(el('span', 'flecha', '▶'), duelo, quien);
+  if (p.tag) sum.append(el('span', 'tag', p.tag));
+  sum.append(el('span', 'cuando', fecha(p.at)));
+  det.append(sum);
+
+  const cuerpo = el('div', 'pdetalle');
+  cuerpo.append(el('div', 'vacio', 'abrí para calcular el detalle'));
+  det.append(cuerpo);
+
+  let pedido = false;
+  det.ontoggle = async () => {
+    if (!det.open || pedido) return;
+    pedido = true;
+    cuerpo.replaceChildren(el('div', 'vacio', 'calculando…'));
+    try {
+      const d = await api('/api/partida', { id: p.matchId });
+      cuerpo.replaceChildren();
+      pintarDetalle(cuerpo, d);
+    } catch (err) {
+      pedido = false;
+      cuerpo.replaceChildren(el('div', 'vacio', 'No se pudo: ' + err.message));
+    }
+  };
+  return det;
+}
+
+function bloque(padre, titulo) {
+  const b = el('div', 'bloque');
+  b.append(el('div', 't', titulo));
+  padre.append(b);
+  return b;
+}
+
+function pintarDetalle(box, d) {
+  if (d.derivado === null) {
+    const b = bloque(box, 'sin timeline');
+    b.append(el('div', 'dim',
+      'Esta partida está en la caché pero sin datos por minuto, así que no hay curva, ni ' +
+      'momentos, ni ítems, ni muertes. Sincronizá: la segunda fase repara timelines viejos.'));
+    return;
+  }
+  const v = d.derivado;
+
+  if (v.curva.length > 0) {
+    const b = bloque(box, 'oro contra tu rival de línea');
+    const tabla = el('div', 'curva-tabla');
+    for (const p of v.curva) {
+      const col = el('div', 'p');
+      col.append(el('span', p.oro >= 0 ? 'ok' : 'bad',
+        (p.oro >= 0 ? '+' : '') + p.oro));
+      col.append(el('span', 'm', p.minuto + '′'));
+      tabla.append(col);
+    }
+    b.append(tabla);
+    if (v.swing) {
+      b.append(el('div', 'dim', 'mayor movimiento: ' + (v.swing.delta >= 0 ? '+' : '') +
+        v.swing.delta + ' de oro entre ' + v.swing.desde + '′ y ' + v.swing.hasta + '′'));
+    }
+  }
+
+  if (v.fases.length > 0) {
+    const b = bloque(box, 'por fase — cs·min tuyo / del rival');
+    b.append(el('div', 'nums', v.fases.map((f) =>
+      f.nombre + ' ' + f.csPorMin.toFixed(1) + '/' +
+      (f.rivalCsPorMin === null ? '?' : f.rivalCsPorMin.toFixed(1)) +
+      ' (' + f.muertes + '†)').join('   ·   ')));
+  }
+
+  const b2 = bloque(box, 'peleas y muertes');
+  b2.append(el('div', null, v.muertes.total + ' muertes (' + v.muertes.solo + ' solo) · ' +
+    // "presente en 0/0 peleas" is a fraction with nothing in it — say there were none.
+    (v.peleas.total === 0
+      ? 'ninguna pelea de 3+ kills'
+      : 'presente en ' + v.peleas.presente + '/' + v.peleas.total + ' peleas · moriste primero en ' +
+        v.peleas.primeroEnMorir) +
+    ' · ' + v.peleas.picks + ' picks sueltos'));
+  b2.append(el('div', 'dim', 'épicos: ' + v.epicos.conCredito + '/' + v.epicos.delEquipo +
+    ' con crédito tuyo · ' + v.epicos.sinWard + ' sin ward tuya 60s antes · ' +
+    v.epicos.muertoAntes + ' con vos muerto 30s antes'));
+
+  if (v.tempo || v.roams) {
+    const b = bloque(box, 'tempo y posición');
+    const partes = [];
+    if (v.tempo) {
+      partes.push('1ª vuelta ' + (v.tempo.tuya === null ? '—' : v.tempo.tuya + '′') +
+        ' vs ' + (v.tempo.suya === null ? '—' : v.tempo.suya + '′'));
+    }
+    if (v.roams) {
+      partes.push(Math.round(v.roams.mid * 100) + '% en mid');
+      partes.push(Math.round(v.roams.mitadEnemiga * 100) + '% en mitad enemiga');
+    }
+    b.append(el('div', null, partes.join(' · ')));
+  }
+
+  if (v.sinCatalogo) {
+    const b = bloque(box, 'ítems');
+    b.append(el('div', 'dim', 'sin catálogo para el parche ' + v.sinCatalogo +
+      ' — corré lol items una vez por parche'));
+  } else if (v.items) {
+    const b = bloque(box, 'build — vos arriba, el rival abajo');
+    b.append(construirBuild(v.items));
+  }
+
+  if (v.momentos.length > 0) {
+    const b = bloque(box, 'lo que salió más caro');
+    for (const m of v.momentos) {
+      const linea = el('div', 'momento');
+      linea.append(el('span', 'min', 'min ' + m.minuto + '  '));
+      linea.append(document.createTextNode(m.linea + '  '));
+      linea.append(el('span', 'dim', '[' + m.oro + ' de oro]'));
+      b.append(linea);
+    }
+    if (v.sinMedir > 0) {
+      b.append(el('div', 'faint', '(' + v.sinMedir +
+        ' muertes sin ventana de 2 min por delante, no rankeadas)'));
+    }
+  }
+}
+
+function construirBuild(items) {
+  const grid = el('div', 'build');
+  const fila = (etiqueta, pasos, tarde) => {
+    grid.append(el('div', 'k', etiqueta));
+    const caja = el('div', 'items');
+    if (pasos.length === 0) caja.append(el('span', 'faint', '—'));
+    for (const paso of pasos) {
+      const celda = el('div', 'item' + (tarde ? ' tarde' : ''));
+      const img = document.createElement('img');
+      img.src = '/img/item/' + paso.id + '.png';
+      img.alt = paso.nombre;
+      img.title = paso.nombre;
+      img.loading = 'lazy';
+      img.onerror = () => { celda.replaceChildren(el('span', null, paso.nombre)); };
+      celda.append(img, el('span', 'min', paso.min));
+      caja.append(celda);
+    }
+    grid.append(caja);
+  };
+  const tarde = items.primerItemMin !== null && items.primerItemMin > 0;
+  fila('vos', items.mios, tarde);
+  fila('rival', items.suyos, false);
+  if (items.primerItemMin !== null) {
+    const g = items.primerItemMin;
+    grid.append(el('div', 'k', ''));
+    grid.append(el('div', 'faint',
+      'primer ítem ' + (g >= 0 ? '+' : '') + g.toFixed(1) + ' min' +
+      (g > 0 ? ' (llegó primero él)' : g < 0 ? ' (llegaste primero)' : '') +
+      ' — se compra con oro, leelo al lado de la curva'));
+  }
+  return grid;
+}
+
+/* --------------------------------------------------------------------- el tagueo
+   The one input the software cannot derive, and the only one that cannot be recovered
+   later (ADR-015). Unchanged in substance; it now lives inside a collapsible that opens
+   itself whenever there is anything pending. */
 const TAGS = [
-  ['mía', 'La produje yo'],
-  ['igual', 'Salía igual'],
-  ['pareja', 'Estuvo pareja'],
+  ['mía', 'La produje yo', '1'],
+  ['igual', 'Salía igual', '2'],
+  ['pareja', 'Estuvo pareja', '3'],
 ];
 
 let sesion = null;
+/** The card the keyboard shortcuts act on: the first pending game on screen. */
+let tarjetaEnFoco = null;
 
-function tarjetaPartida(p, alTaguear) {
+function tarjetaPartida(p, alTaguear, primera) {
   const card = el('div', 'card partida');
-  /* The portrait is the fastest way to recognise WHICH game this was: he remembers the champion
-     he played long before he remembers the timestamp. */
+  if (primera) card.style.borderColor = 'var(--accent)';
   const retrato = cara(p.campeon, p.gano ? 'gano' : 'perdio');
   if (retrato) card.append(retrato);
   const quien = el('div', 'quien');
   quien.append(el('span', null, p.campeon + '  '));
   quien.append(el('span', p.gano ? 'victoria' : 'derrota', p.gano ? 'victoria' : 'DERROTA'));
-  quien.append(el('div', 'cuando',
-    new Date(p.terminoAt).toLocaleString('es-AR', { hourCycle: 'h23' })));
+  quien.append(el('div', 'cuando', fechaHora(p.terminoAt)));
   card.append(quien);
 
   const tags = el('div', 'tags');
-  for (const [valor, etiqueta] of TAGS) {
+  const marcar = async (valor, boton) => {
+    for (const otro of tags.children) otro.disabled = true;
+    try {
+      // One request per game, and the tag is on disk before this resolves.
+      if (sesion === null) sesion = (await post('/api/sesion/abrir')).sesion;
+      await post('/api/tag', { matchId: p.matchId, tag: valor, sesion });
+      boton.classList.add('on');
+      setTimeout(alTaguear, 300);
+    } catch (err) {
+      fallar(err);
+      for (const otro of tags.children) otro.disabled = false;
+    }
+  };
+  for (const [valor, etiqueta, tecla] of TAGS) {
     const b = el('button', null, etiqueta);
-    b.onclick = async () => {
-      for (const otro of tags.children) otro.disabled = true;
-      try {
-        // One request per game, and the tag is on disk before this resolves.
-        if (sesion === null) sesion = (await post('/api/sesion/abrir')).sesion;
-        await post('/api/tag', { matchId: p.matchId, tag: valor, sesion });
-        b.classList.add('on');
-        setTimeout(alTaguear, 350);
-      } catch (err) {
-        document.getElementById('error').textContent = 'Error: ' + err.message;
-        for (const otro of tags.children) otro.disabled = false;
-      }
-    };
+    b.title = 'tecla ' + tecla;
+    b.dataset.tecla = tecla;
+    b.onclick = () => marcar(valor, b);
     tags.append(b);
   }
   card.append(tags);
+  if (primera) tarjetaEnFoco = tags;
   return card;
 }
 
-async function renderPendientes() {
-  const box = document.getElementById('pendientes');
-  box.replaceChildren();
+async function renderPendientes(box) {
   const { deLaSesion, atrasadas } = await api('/api/pendientes');
+  tarjetaEnFoco = null;
 
-  const refrescarTodo = () => { void renderPendientes(); void refrescar(); };
+  const refrescarTodo = () => {
+    const s = SECCIONES.find((x) => x.id === 'taguear');
+    if (s) s.redibujar();
+    void refrescar();
+  };
 
   if (deLaSesion.length === 0 && atrasadas.length === 0) {
-    const card = el('div', 'card');
-    card.append(el('div', 'ok', 'Nada sin taguear.'));
-    box.append(card);
-    document.getElementById('tilt').replaceChildren();
+    box.append(el('div', 'vacio ok', 'Nada sin taguear. Listo.'));
     return;
   }
 
   if (deLaSesion.length > 0) {
     box.append(el('p', 'hint',
       'Más viejas primero, en el orden en que las jugaste. Cada click se guarda en el momento: ' +
-      'si cerrás la pestaña a la mitad, lo que ya marcaste queda.'));
-    for (const p of deLaSesion) box.append(tarjetaPartida(p, refrescarTodo));
+      'si cerrás la pestaña a la mitad, lo que ya marcaste queda. Teclas 1 · 2 · 3.'));
+    deLaSesion.forEach((p, i) => box.append(tarjetaPartida(p, refrescarTodo, i === 0)));
   } else {
     box.append(el('p', 'hint', 'Nada de las últimas 12 horas.'));
   }
@@ -308,59 +1086,53 @@ async function renderPendientes() {
   // observation and the lag column will say so; hiding the pile entirely would be deciding for
   // him, showing it open would bury tonight's games under it.
   if (atrasadas.length > 0) {
-    const abrir = el('button', null,
-      'Ver ' + atrasadas.length + ' partida(s) más viejas');
+    const abrir = el('button', 'chico', 'Ver ' + atrasadas.length + ' partida(s) más viejas');
     const viejas = el('div');
-    const nota = el('p', 'hint',
-      'Tienen más de 12 horas. Taguearlas es acordarse, no observar — queda anotado cuánto ' +
-      'tardaste, así que no se mezclan con las de recién.');
     abrir.onclick = () => {
       abrir.remove();
-      viejas.append(nota);
-      for (const p of atrasadas) viejas.append(tarjetaPartida(p, refrescarTodo));
+      viejas.append(el('p', 'hint',
+        'Tienen más de 12 horas. Taguearlas es acordarse, no observar — queda anotado cuánto ' +
+        'tardaste, así que no se mezclan con las de recién.'));
+      for (const p of atrasadas) viejas.append(tarjetaPartida(p, refrescarTodo, false));
     };
     // The other honest answer to a backlog, and the one he actually gave: he does not remember
     // those games. It writes a dated decision, it does not delete anything, and the panel stops
     // demanding something that cannot be done well.
-    const dejar = el('button', null, 'No las voy a taguear');
+    const dejar = el('button', 'chico', 'No las voy a taguear');
     dejar.onclick = async () => {
+      if (!confirm('Van a quedar ' + atrasadas.length + ' partida(s) sin taguear a propósito, ' +
+        'con la fecha de hoy. Se puede deshacer, pero no se puede taguear después.')) return;
       dejar.disabled = true;
       dejar.textContent = 'anotando…';
       try {
         const r = await post('/api/dejar-atras');
+        aviso(r.dejadasAtras + ' partida(s) quedan sin taguear a propósito. Las que juegues ' +
+          'de ahora en más aparecen acá.', 'bien');
         refrescarTodo();
-        alert('Anotado: ' + r.dejadasAtras + ' partida(s) quedan sin taguear a propósito. ' +
-          'Las que juegues de ahora en más aparecen acá.');
       } catch (e) {
         dejar.disabled = false;
         dejar.textContent = 'No las voy a taguear';
-        alert('No se pudo: ' + e.message);
+        fallar(e);
       }
     };
-    box.append(abrir, dejar, viejas);
+    const fila = el('div', 'tags');
+    fila.append(abrir, dejar);
+    box.append(fila, viejas);
   }
 
-  renderTilt();
-}
-
-function renderTilt() {
-  const box = document.getElementById('tilt');
-  box.replaceChildren();
-  const card = el('div', 'card');
-  card.append(el('div', 'que', 'Tilt de la sesión'));
-  card.append(el('div', 'porque',
+  box.append(el('h3', null, 'tilt de la sesión'));
+  box.append(el('div', 'hint',
     'Cómo terminaste. "No contesto" no es un 3 del medio: queda sin medir, que es distinto.'));
   const row = el('div', 'tags');
   for (const n of [1, 2, 3, 4, 5]) {
-    const b = el('button', null, String(n));
+    const b = el('button', 'chico', String(n));
     b.onclick = () => guardarTilt(n, row);
     row.append(b);
   }
-  const skip = el('button', null, 'No contesto');
+  const skip = el('button', 'chico', 'No contesto');
   skip.onclick = () => guardarTilt(null, row);
   row.append(skip);
-  card.append(row);
-  box.append(card);
+  box.append(row);
 }
 
 async function guardarTilt(tilt, row) {
@@ -369,31 +1141,38 @@ async function guardarTilt(tilt, row) {
     await post('/api/sesion/cerrar', { sesion, tilt });
     sesion = null;
     for (const b of row.children) b.disabled = true;
-  } catch (err) {
-    document.getElementById('error').textContent = 'Error: ' + err.message;
-  }
+    aviso(tilt === null ? 'Sesión cerrada sin tilt.' : 'Sesión cerrada con tilt ' + tilt + '.', 'bien');
+  } catch (err) { fallar(err); }
 }
 
-function renderSync() {
-  const box = document.getElementById('sync');
-  box.replaceChildren();
-  const card = el('div', 'card');
-  const boton = el('button', null, 'Sincronizar ahora');
+/* ---------------------------------------------------------------------- el sync */
+let syncCorriendo = false;
+
+function renderSync(box) {
+  const card = el('div', 'card plano');
+  const boton = el('button', 'principal', 'Sincronizar ahora');
+  boton.id = 'boton-sync';
   const barra = el('div', 'barra');
   const relleno = el('div');
   barra.append(relleno);
   const log = el('div', 'log');
+  card.append(el('div', 'hint',
+    'Baja las partidas nuevas y después repara los timelines que falten de partidas viejas. ' +
+    'Unas 25 partidas por minuto: el límite de Riot es 100 requests cada 2 minutos.'));
   card.append(boton, barra, log);
   box.append(card);
 
   boton.onclick = () => {
+    if (syncCorriendo) return;
+    syncCorriendo = true;
     boton.disabled = true;
     log.textContent = 'conectando…';
     relleno.style.width = '0';
 
     // EventSource cannot send headers, which is exactly why the token lives in the query string
     // rather than in an Authorization header.
-    const src = new EventSource('/api/sync?t=' + TOKEN + '&cuenta=smurf');
+    const src = new EventSource('/api/sync?' + qs());
+    const terminar = () => { src.close(); boton.disabled = false; syncCorriendo = false; };
     src.onmessage = (msg) => {
       const e = JSON.parse(msg.data);
       if (e.tipo === 'inicio') log.textContent = 'sincronizando ' + e.cuenta + '…';
@@ -412,134 +1191,100 @@ function renderSync() {
           // Said out loud: one click is capped, so "finished" is not "there is nothing left".
           (e.sinTimeline ? ', quedan ' + e.sinTimeline + ' sin timeline (dale de nuevo)' : '') +
           (e.errores.length ? '\\n' + e.errores.slice(0, 3).join('\\n') : '');
-        src.close();
-        boton.disabled = false;
-        void renderPendientes();
-        void refrescar();
-        void renderMomentos();
-        void renderGraficos();
-        void renderCobertura();
+        aviso(e.bajadas + ' partida(s) nueva(s)' +
+          (e.reparados ? ', ' + e.reparados + ' timeline(s) reparado(s)' : ''), 'bien');
+        terminar();
+        void arrancar();
       }
       if (e.tipo === 'error') {
         log.textContent = 'no corrió: ' + e.mensaje;
-        src.close();
-        boton.disabled = false;
+        fallar(new Error(e.mensaje));
+        terminar();
       }
     };
     // Fires when the stream drops without a 'fin' — a dead key, a closed laptop. The button has
     // to come back, or the page is bricked until a reload.
     src.onerror = () => {
-      src.close();
-      boton.disabled = false;
       if (!log.textContent || log.textContent === 'conectando…') {
         log.textContent = 'se cortó la conexión con el servidor';
       }
+      terminar();
     };
   };
 }
 
-async function renderMomentos() {
-  const box = document.getElementById('momentos');
-  box.replaceChildren();
-  const partidas = await api('/api/momentos');
+function lanzarSync() {
+  const b = document.getElementById('boton-sync');
+  if (b && !b.disabled) b.click();
+}
+
+/* ------------------------------------------------------------- lo que salió caro */
+async function renderMomentos(box) {
+  const partidas = await api('/api/momentos', { limite: 5 });
   if (partidas.length === 0) {
-    box.append(el('div', 'card dim', 'No hay partidas de mid en soloq en la caché.'));
+    box.append(el('div', 'vacio', 'No hay partidas con ese filtro.'));
     return;
   }
   for (const p of partidas) {
-    const card = el('div', 'card');
-    const head = el('div', 'cabeza');
-    const mia = cara(p.campeon, p.gano ? 'gano' : 'perdio');
-    if (mia) head.append(mia);
-    const nombres = el('div', 'nombres');
-    nombres.append(el('span', null, p.campeon));
+    const card = el('div', 'card plano');
+    const cabeza = el('div', 'cabeza');
+    const retrato = cara(p.campeon, p.gano ? 'gano' : 'perdio');
+    if (retrato) cabeza.append(retrato);
     if (p.rival) {
-      nombres.append(el('span', 'vs', '  vs  '));
-      nombres.append(el('span', null, p.rival));
+      cabeza.append(el('span', 'vs', 'vs'));
+      const r = cara(p.rival, 'chico');
+      if (r) cabeza.append(r);
     }
-    head.append(nombres);
-    const suya = cara(p.rival, 'chico');
-    if (suya) head.append(suya);
-    const pill = el('span', 'pill ' + (p.gano ? 'victoria' : 'derrota'), p.gano ? 'victoria' : 'derrota');
-    pill.style.marginLeft = 'auto';
-    head.append(pill);
-    if (p.tag) head.append(el('span', 'tag', p.tag));
-    card.append(head);
-    card.append(el('div', 'cuando',
-      new Date(p.at).toLocaleString('es-AR', { hourCycle: 'h23' })));
+    const nombres = el('div', 'nombres', p.campeon + (p.rival ? ' vs ' + p.rival : ''));
+    cabeza.append(nombres);
+    cabeza.append(el('span', 'pill ' + (p.gano ? 'ok' : 'bad'), p.gano ? 'ganada' : 'perdida'));
+    if (p.tag) cabeza.append(el('span', 'tag', p.tag));
+    const ver = el('button', 'chico', 'ver todo');
+    ver.style.marginLeft = 'auto';
+    ver.onclick = () => abrirPartida(p.matchId);
+    cabeza.append(ver);
+    card.append(cabeza);
+    card.append(el('div', 'faint', fechaHora(p.at)));
 
     if (p.sinTimeline) {
-      card.append(el('div', 'porque', 'sin timeline en caché — nada que derivar'));
-    } else if (p.momentos.length === 0) {
-      card.append(el('div', 'porque', 'sin momentos medibles'));
-    } else {
-      for (const m of p.momentos) {
-        const row = el('div', 'momento');
-        row.append(el('span', 'min', 'min ' + m.minuto + '  '));
-        row.append(el('span', null, m.linea + '  [' + m.oro + ' de oro]'));
-        card.append(row);
-      }
+      card.append(el('div', 'dim',
+        'Sin timeline: no hay minuto que mirar. Sincronizá y se repara.'));
+      box.append(card);
+      continue;
     }
-    // The build sits under the moments and above the caveats: it is the same game read from
-    // another angle, and the timing only means something next to how the game was going.
-    if (p.items && p.items.mios.length > 0) {
-      const fila = (pasos) => {
-        const box = el('div', 'items');
-        if (pasos.length === 0) { box.append(el('span', 'dim', '—')); return box; }
-        for (const paso of pasos) {
-          const celda = el('div', 'item');
-          const img = document.createElement('img');
-          img.src = '/img/item/' + paso.id + '.png';
-          img.alt = paso.nombre;
-          img.title = paso.nombre + ' — ' + paso.min;
-          img.loading = 'lazy';
-          img.onerror = () => { celda.replaceChildren(el('span', null, paso.nombre)); };
-          celda.append(img);
-          celda.append(el('span', 'min', paso.min));
-          box.append(celda);
-        }
-        return box;
-      };
-      const build = el('div', 'build');
-      build.append(el('div', 'k', 'vos'));
-      build.append(fila(p.items.mios));
-      build.append(el('div', 'k', 'rival'));
-      build.append(fila(p.items.suyos));
-      card.append(build);
-      if (p.items.primerItemMin !== null) {
-        const g = p.items.primerItemMin;
-        card.append(el('div', 'porque',
-          'primer ítem ' + (g >= 0 ? '+' : '') + g.toFixed(1) + ' min' +
-          (g > 0 ? ' — él llegó primero' : g < 0 ? ' — llegaste primero' : ' — empate')));
-      }
-    } else if (p.items === null && !p.sinTimeline) {
-      card.append(el('div', 'porque', 'ítems: falta el catálogo de ese parche (lol items)'));
+    if (p.items) card.append(construirBuild(p.items));
+    if (p.momentos.length === 0) card.append(el('div', 'faint', 'sin momentos medibles'));
+    for (const m of p.momentos) {
+      const linea = el('div', 'momento');
+      linea.append(el('span', 'min', 'min ' + m.minuto + '  '));
+      linea.append(document.createTextNode(m.linea + '  '));
+      linea.append(el('span', 'dim', '[' + m.oro + ' de oro]'));
+      card.append(linea);
     }
     if (p.sinMedir > 0) {
-      card.append(el('div', 'porque',
-        p.sinMedir + ' muerte(s) sin ventana de 2 min por delante, no rankeadas'));
+      card.append(el('div', 'faint',
+        '(' + p.sinMedir + ' muertes sin ventana de 2 min por delante, no rankeadas)'));
     }
     box.append(card);
   }
-  box.append(el('p', 'hint',
-    'Los replays .rofl se rompen al cambiar de parche: esto sirve dentro de la semana.'));
+  box.append(el('div', 'alcance',
+    'Los replays .rofl son locales y se rompen al cambiar de parche: esto sirve dentro de la semana.'));
 }
 
-async function renderGraficos() {
-  const box = document.getElementById('graficos');
-  box.replaceChildren();
+/* ------------------------------------------------------------------ curva y mapa */
+async function renderGraficos(box) {
   const g = await api('/api/graficos');
   if (g.curva) {
-    const card = el('div', 'card');
-    card.append(el('div', 'que', 'Oro contra tu rival de línea'));
+    const card = el('div', 'card plano');
+    card.append(el('div', 't', 'oro contra tu rival de línea — última partida medible'));
     const holder = el('div', 'svgbox');
     holder.innerHTML = g.curva;
     card.append(holder);
     box.append(card);
   }
-  const card = el('div', 'card');
-  card.append(el('div', 'que', 'Dónde morís'));
-  card.append(el('div', 'porque',
+  const card = el('div', 'card plano');
+  card.append(el('div', 't', 'dónde morís'));
+  card.append(el('div', 'dim',
     g.muertes + ' muertes en ' + g.partidas + ' partidas · ' +
     g.propiaMitad + ' en tu mitad, ' + (g.muertes - g.propiaMitad) + ' en la enemiga'));
   const holder = el('div', 'svgbox');
@@ -548,26 +1293,30 @@ async function renderGraficos() {
   box.append(card);
 }
 
-async function renderCobertura() {
-  const box = document.getElementById('cobertura');
-  box.replaceChildren();
+/* -------------------------------------------------------------------- cobertura */
+async function renderCobertura(box) {
   const c = await api('/api/cobertura');
-  const card = el('div', 'card');
-  card.append(el('div', 'porque',
+  box.append(el('div', 'hint',
     c.totales.matchups + ' matchups · ' + c.totales.reps + ' reps · ' +
     c.totales.mudos + ' sobre los que no puedo decir nada'));
   // The meta is either here, absent (normal), or present and unreadable (not normal). The
   // table below looks identical in all three cases, so the difference has to be said out loud.
-  if (c.problemaPriors) card.append(el('div', 'porque', c.problemaPriors));
+  if (c.problemaPriors) box.append(el('div', 'dim', c.problemaPriors));
 
-  const table = document.createElement('table');
+  const buscar = el('input');
+  buscar.placeholder = 'filtrar campeón…';
+  buscar.size = 16;
+  box.append(buscar);
+
+  const tabla = document.createElement('table');
   const head = document.createElement('tr');
   for (const h of ['matchup', 'acá', 'reps', 'confianza', 'falta']) {
     const th = document.createElement('th');
     th.textContent = h;
     head.append(th);
   }
-  table.append(head);
+  tabla.append(head);
+  const filas = [];
   for (const f of c.filas) {
     const tr = document.createElement('tr');
     const cells = [
@@ -582,30 +1331,42 @@ async function renderCobertura() {
       td.textContent = value;
       tr.append(td);
     }
-    table.append(tr);
+    tr.dataset.busca = (f.campeon + ' ' + f.rival).toLowerCase();
+    filas.push(tr);
+    tabla.append(tr);
   }
-  card.append(table);
-  // The scope travels with the numbers, always (G-015).
-  card.append(el('div', 'alcance',
-    'alcance: cuenta ' + c.alcance.cuenta + ' · cola ' + c.alcance.cola +
-    ' · remakes ' + c.alcance.remakes +
-    ' · las reps se suman entre cuentas, el récord no'));
-  box.append(card);
+  buscar.oninput = () => {
+    const q = buscar.value.trim().toLowerCase();
+    for (const tr of filas) tr.hidden = q !== '' && !tr.dataset.busca.includes(q);
+  };
+  box.append(tabla);
+  box.append(el('div', 'alcance',
+    'alcance: ' + c.alcance.cuenta + ' · cola ' + c.alcance.cola + ' · remakes ' + c.alcance.remakes +
+    '. Las reps se suman entre cuentas (conocimiento); el récord no (rendimiento, ADR-011).'));
 }
 
-async function renderLedger() {
-  const box = document.getElementById('ledger');
-  box.replaceChildren();
+/* ---------------------------------------------------------------------- el ledger */
+async function renderLedger(box) {
   const hs = await api('/api/ledger');
   if (hs.length === 0) {
-    box.append(el('div', 'card dim', 'El ledger está vacío.'));
+    box.append(el('div', 'vacio',
+      'El ledger está vacío. Se registra desde scripts/register-hypotheses.ts.'));
     return;
   }
+  box.append(el('div', 'hint',
+    'Cada fila es una predicción con fecha, evaluada SÓLO contra partidas posteriores. ' +
+    '"todavía sin muestra suficiente" durante meses es la respuesta correcta, no una herramienta rota.'));
   for (const h of hs) {
-    const card = el('div', 'card');
-    card.append(el('div', 'que', h.id));
+    const card = el('div', 'card plano');
+    const cab = el('div', 'cabeza');
+    cab.append(el('span', 'nombres', h.id));
+    if (h.ultima) {
+      const mal = h.ultima.veredicto === 'inconsistent' || h.ultima.veredicto === 'unmeasurable';
+      cab.append(el('span', 'pill ' + (mal ? 'bad' : 'dim'), h.ultima.veredicto));
+    }
+    card.append(cab);
     card.append(el('div', null, h.claim));
-    card.append(el('div', 'porque',
+    card.append(el('div', 'dim',
       'baseline ' + h.baseline.toFixed(3) + ' sobre n=' + h.baselineN +
       ' · necesita n=' + h.necesita +
       (h.ultima ? ' · última: ' + h.ultima.lectura + ' (n=' + h.ultima.n + ')' : ' · sin evaluar')));
@@ -614,153 +1375,365 @@ async function renderLedger() {
   }
 }
 
-function renderPrep() {
-  const box = document.getElementById('prep');
-  box.replaceChildren();
-  const card = el('div', 'card');
-  const mio = el('input');
-  mio.placeholder = 'tu campeón';
+/* ---------------------------------------------------------------- antes de entrar */
+async function renderPrep(box) {
+  box.append(el('div', 'hint',
+    'Tu récord en esta cuenta, tus reps en todas, y el meta de op.gg. Separados a propósito: ' +
+    'el conocimiento se suma entre cuentas, el rendimiento no.'));
+
+  const fila = el('div', 'filtros');
+  const mio = el('select');
+  mio.title = 'tu campeón';
+  const vacio = el('option', null, 'tu campeón…');
+  vacio.value = '';
+  mio.append(vacio);
+  for (const c of CAMPEONES) {
+    const o = el('option', null, c.valor);
+    o.value = c.valor;
+    mio.append(o);
+  }
   const suyo = el('input');
-  suyo.placeholder = 'el rival';
-  const boton = el('button', null, 'Ver');
-  const salida = el('div', 'log');
+  suyo.placeholder = 'el rival (ej. Zed)';
+  suyo.size = 14;
+  const boton = el('button', 'principal chico', 'Ver');
+  fila.append(mio, suyo, boton);
+  const salida = el('div');
+  box.append(fila, salida);
 
-  const row = el('div', 'tags');
-  row.append(mio, suyo, boton);
-  card.append(row, salida);
-  box.append(card);
-
-  boton.onclick = async () => {
-    if (!mio.value || !suyo.value) return;
+  const consultar = async () => {
+    if (!mio.value || !suyo.value) {
+      salida.replaceChildren(el('div', 'vacio', 'Elegí tu campeón y escribí el rival.'));
+      return;
+    }
+    salida.replaceChildren(el('div', 'vacio', 'buscando…'));
     try {
-      const p = await api('/api/prep?campeon=' + encodeURIComponent(mio.value) +
-        '&rival=' + encodeURIComponent(suyo.value));
+      const p = await api('/api/prep', { campeon: mio.value, rival: suyo.value.trim() });
+      salida.replaceChildren();
+      const card = el('div', 'card plano');
+      const cab = el('div', 'cabeza');
+      const a = cara(p.campeon, 'chico');
+      if (a) cab.append(a);
+      cab.append(el('span', 'vs', 'vs'));
+      const b = cara(p.rival, 'chico');
+      if (b) cab.append(b);
+      cab.append(el('span', 'nombres', p.campeon + ' vs ' + p.rival));
+      card.append(cab);
+
       const pct = (x) => (Number.isFinite(x) ? (x * 100).toFixed(1) + '%' : '—');
-      const lineas = [
-        p.campeon + ' vs ' + p.rival,
-        'reps totales (todas las cuentas): ' + p.reps,
-        'en esta cuenta: ' + p.propias.ganadas + '/' + p.propias.jugadas,
-        ...p.otrasCuentas.map((o) =>
-          'en ' + o.cuenta + ': ' + o.ganadas + '/' + o.jugadas + ' — NO se suma, es rendimiento'),
-        p.meta === null
-          ? 'sin prior de op.gg'
-          : 'meta op.gg: ' + pct(p.meta.winRate) + ' sobre ' + p.meta.muestra + ' partidas',
-        ...p.estimados.map((e) =>
-          'estimado (peso ' + e.peso + '): ' + pct(e.winRate) + ' · propio ' + pct(e.propio)),
-        'confianza: ' + p.confianza,
-      ];
-      salida.textContent = lineas.join('\\n');
+      const tiles = el('div', 'tiles');
+      const tile = (k, v, sub) => {
+        const t = el('div', 'tile');
+        t.append(el('span', 'k', k));
+        t.append(el('div', 'v nums', v));
+        if (sub) t.append(el('div', 'vs', sub));
+        tiles.append(t);
+      };
+      tile('en esta cuenta', p.propias.ganadas + '/' + p.propias.jugadas, 'rendimiento, no se suma');
+      tile('reps totales', String(p.reps), 'conocimiento, sí se suma');
+      tile('meta op.gg', p.meta === null ? '—' : pct(p.meta.winRate),
+        p.meta === null ? 'sin prior' : 'sobre ' + p.meta.muestra + ' partidas');
+      card.append(tiles);
+
+      if (p.otrasCuentas.length > 0) {
+        card.append(el('div', 'dim', p.otrasCuentas.map((o) =>
+          'en ' + o.cuenta + ': ' + o.ganadas + '/' + o.jugadas).join(' · ') +
+          ' — NO se suma: es rendimiento'));
+      }
+      card.append(el('h3', null, 'estimado con shrinkage'));
+      card.append(el('div', 'nums', p.estimados.map((e) =>
+        'peso ' + e.peso + ': ' + pct(e.winRate) + ' (' + pct(e.propio) + ' tuyo)').join('   ')));
+      card.append(el('div', 'alcance', 'confianza: ' + p.confianza));
+      salida.append(card);
     } catch (err) {
-      salida.textContent = 'Error: ' + err.message;
+      salida.replaceChildren(el('div', 'vacio', 'No se pudo: ' + err.message));
     }
   };
+  boton.onclick = consultar;
+  suyo.onkeydown = (e) => { if (e.key === 'Enter') void consultar(); };
+  salida.append(el('div', 'vacio', 'Elegí tu campeón y escribí el rival.'));
 }
 
-/**
- * The first-run form.
- *
- * Before it, a fresh cache made this page a wall: /api/estado answered with an empty account
- * list and the five reading sections each 404'd with "no conozco la cuenta 'smurf'", which the
- * error line showed one at a time with nothing to do about any of them. Resolving an account
- * lived only behind the MCP tool, so the panel could DIAGNOSE the empty cache and not fix it.
- */
+/* ------------------------------------------------------------------ cuentas y key */
+async function renderCuentas(box) {
+  const e = await api('/api/estado');
+
+  for (const c of e.cuentas) {
+    const card = el('div', 'card plano');
+    const cab = el('div', 'cabeza');
+    cab.append(el('span', 'nombres', c.label));
+    if (c.label === ALCANCE.cuenta) cab.append(el('span', 'pill dim', 'viendo'));
+    card.append(cab);
+    const add = (k, v) => {
+      const row = el('div', 'row');
+      row.append(el('span', 'k', k), el('span', null, v));
+      card.append(row);
+    };
+    for (const r of c.rango) {
+      add(r.cola, r.texto + (r.wins === null ? '' : '  ' + r.wins + 'W-' + r.losses + 'L'));
+    }
+    add('sin taguear', String(c.pendientes));
+    // Stated, not hidden: the decision left these behind and the panel says how many, so the
+    // number never quietly becomes "there was nothing there".
+    if (c.dejadasAtras > 0) add('dejadas atrás', c.dejadasAtras + ' (a propósito)');
+    // Same principle: a game with no timeline is missing from almost every number on this page.
+    if (c.sinTimeline > 0) add('sin timeline', c.sinTimeline + ' (sin datos por minuto)');
+    add('último sync', c.ultimoSync === null ? 'nunca'
+      : fechaHora(c.ultimoSync.at) + (c.ultimoSync.terminado ? '' : ' — no terminó') +
+        (c.ultimoSync.error ? ' — ' + c.ultimoSync.error : ''));
+    box.append(card);
+  }
+
+  const card = el('div', 'card plano');
+  card.append(el('div', 't', 'key de riot'));
+  const k = e.key;
+  card.append(el('div', k.presente ? (k.probablementeVencida ? 'warn' : 'ok') : 'bad',
+    k.presente ? (k.probablementeVencida ? 'presente pero probablemente vencida' : 'presente')
+      : 'no hay key'));
+  if (k.horasDesdeQueSePego !== null) {
+    card.append(el('div', 'dim', 'pegada hace ' + k.horasDesdeQueSePego.toFixed(0) + ' h · tipo ' + k.tipo));
+  }
+  if (k.problema) card.append(el('div', 'dim', k.problema));
+  card.append(el('div', 'alcance', 'archivo: ' + k.archivo + '. El valor nunca llega al navegador.'));
+  box.append(card);
+}
+
+/* ------------------------------------------------------------------- primera vez
+   Before this existed, a fresh cache made the page a wall: /api/estado answered with an
+   empty account list and every reading section 404'd, one error at a time, with nothing to
+   do about any of them. */
 function renderPrimeraVez() {
   const box = document.getElementById('primera-vez');
   box.replaceChildren();
-  const card = el('div', 'card');
-  card.append(el('h2', null, 'Empezá por acá'));
-  card.append(el('div', 'porque',
-    'No hay ninguna cuenta todavía. Poné tu Riot ID como aparece en el cliente ' +
-    '(Nombre#TAG) y una etiqueta corta para llamarla después.'));
+  const card = el('div', 'destacada');
+  const txt = el('div', 'txt');
+  txt.append(el('div', 'que', 'Empezá por acá'));
+  txt.append(el('div', 'porque',
+    'No hay ninguna cuenta todavía. Poné tu Riot ID como aparece en el cliente (Nombre#TAG) ' +
+    'y una etiqueta corta para llamarla después.'));
 
-  const riotId = document.createElement('input');
+  const riotId = el('input');
   riotId.placeholder = 'LegendofTorcuato#LAS';
   riotId.size = 24;
-  const etiqueta = document.createElement('input');
+  const etiqueta = el('input');
   etiqueta.placeholder = 'smurf';
   etiqueta.size = 10;
-  const boton = el('button', null, 'Registrar');
-  const salida = el('div', 'porque', '');
-
-  card.append(riotId, etiqueta, boton, salida);
+  const boton = el('button', 'principal', 'Registrar');
+  const salida = el('div', 'log');
+  const fila = el('div', 'acciones');
+  fila.append(riotId, etiqueta, boton);
+  txt.append(fila, salida);
+  card.append(txt);
   box.append(card);
 
-  boton.onclick = async () => {
+  const registrar = async () => {
     if (!riotId.value) return;
     boton.disabled = true;
     salida.textContent = 'preguntándole a Riot…';
     try {
       const r = await post('/api/cuenta', { riotId: riotId.value, label: etiqueta.value });
-      salida.textContent = r.gameName + '#' + r.tagLine + ' guardada como ' + r.label +
-        '. Ahora dale a sincronizar.';
+      aviso(r.gameName + '#' + r.tagLine + ' guardada como ' + r.label + '.', 'bien');
+      ALCANCE.cuenta = r.label;
+      guardarAlcance();
       await arrancar();
     } catch (err) {
-      // The most likely failure by far is a missing or expired key, and the message from the
+      // The likeliest failure by far is a missing or expired key, and the message from the
       // client already says so — repeating it here is what stops this looking like a bad ID.
       salida.textContent = 'Error: ' + err.message;
       boton.disabled = false;
     }
   };
+  boton.onclick = registrar;
+  riotId.onkeydown = (e) => { if (e.key === 'Enter') void registrar(); };
 }
 
-async function refrescar() {
-  try {
-    const e = await api('/api/estado');
-    renderAcciones(e.acciones);
-    renderCuentas(e.cuentas);
-    renderKey(e.key);
-    document.getElementById('error').textContent = '';
-    return e;
-  } catch (err) {
-    document.getElementById('error').textContent = 'Error: ' + err.message;
-    return null;
+/* ---------------------------------------------------------------------- atajos
+   The ritual is one tap per game (ADR-007) and the mouse is the slow way to do it. Nothing
+   here does anything a button does not already do, which is the rule: a shortcut is a faster
+   path to a visible control, never the only path to a hidden one. */
+const ATAJOS = [
+  ['1 · 2 · 3', 'taguear la primera partida pendiente'],
+  ['s', 'sincronizar'],
+  ['p', 'ir a las partidas'],
+  ['e', 'expandir todo · E contraer todo'],
+  ['?', 'esta ayuda'],
+];
+
+function atajos(e) {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+
+  if (e.key === '1' || e.key === '2' || e.key === '3') {
+    if (!tarjetaEnFoco) return;
+    const boton = [...tarjetaEnFoco.children].find((b) => b.dataset.tecla === e.key);
+    if (boton && !boton.disabled) { boton.click(); e.preventDefault(); }
+    return;
+  }
+  if (e.key === 's') { abrirSeccion('sync'); lanzarSync(); e.preventDefault(); return; }
+  if (e.key === 'p') { abrirSeccion('partidas'); e.preventDefault(); return; }
+  if (e.key === 'e') { for (const s of SECCIONES) s.det.open = true; e.preventDefault(); return; }
+  if (e.key === 'E') { for (const s of SECCIONES) s.det.open = false; e.preventDefault(); return; }
+  if (e.key === '?') { abrirSeccion('ayuda'); e.preventDefault(); }
+}
+
+function renderAyuda(box) {
+  box.append(el('div', 'hint', 'Todo lo de acá también se hace con el mouse.'));
+  const grid = el('div', 'teclas');
+  for (const [tecla, que] of ATAJOS) {
+    grid.append(el('kbd', null, tecla));
+    grid.append(el('span', null, que));
+  }
+  box.append(grid);
+  box.append(el('h3', null, 'cómo leer esta página'));
+  const notas = [
+    'El panel escucha sólo en 127.0.0.1 y la URL lleva un token que cambia en cada arranque: ' +
+      'guardar el favorito no sirve. Mientras la ventana negra esté abierta, esto anda.',
+    'Las secciones se acuerdan de si las dejaste abiertas, y cada una se calcula recién cuando ' +
+      'la abrís. Por eso el número que ves en el título vale aunque esté cerrada.',
+    'Arriba elegís cuenta, rol y cola: TODO lo de abajo se lee con ese filtro, y queda en la URL.',
+    'Ninguna métrica que suba porque vas ganando tiene tarjeta destacada. Están abajo, como ' +
+      'descripción, nunca como conclusión.',
+  ];
+  for (const n of notas) box.append(el('div', 'dim', '· ' + n));
+}
+
+/* ---------------------------------------------------------------------- arranque */
+let SECCIONES_ARMADAS = false;
+
+function armarSecciones() {
+  if (SECCIONES_ARMADAS) return;
+  SECCIONES_ARMADAS = true;
+  const box = document.getElementById('secciones');
+  const abiertas = leerAbiertas();
+
+  const defs = [
+    ['resumen', 'Cómo viene', renderResumen, true, (e) => null],
+    ['taguear', 'Taguear', renderPendientes, false, (e) => {
+      const n = e ? e.cuentas.reduce((a, c) => a + c.pendientes, 0) : 0;
+      return n > 0
+        ? { badge: String(n), tono: 'urgente', texto: 'sin taguear' }
+        : { badge: 'al día', tono: 'bien', texto: '' };
+    }],
+    ['sync', 'Sincronizar', renderSync, false, (e) => {
+      if (!e) return null;
+      const c = e.cuentas.find((x) => x.label === ALCANCE.cuenta) || e.cuentas[0];
+      if (!c) return null;
+      return { badge: '', texto: c.ultimoSync === null ? 'nunca sincronizada'
+        : 'último: ' + fechaHora(c.ultimoSync.at) };
+    }],
+    ['partidas', 'Partidas', renderPartidas, false, () => ({ badge: '', texto: 'buscar y filtrar' })],
+    ['momentos', 'Lo que salió caro', renderMomentos, false, () => ({ badge: '', texto: 'últimas 5' })],
+    ['graficos', 'Curva y mapa de muertes', renderGraficos, false, () => null],
+    ['prep', 'Antes de entrar', renderPrep, false, () => ({ badge: '', texto: 'matchup' })],
+    ['cobertura', 'De qué no puedo hablar', renderCobertura, false, () => null],
+    ['ledger', 'Hipótesis registradas', renderLedger, false, () => null],
+    ['cuentas', 'Cuentas y key', renderCuentas, false, (e) => {
+      if (!e || !e.key) return null;
+      return e.key.presente && !e.key.probablementeVencida
+        ? { badge: '', texto: 'key ok' }
+        : { badge: 'key', tono: 'urgente', texto: e.key.presente ? 'probablemente vencida' : 'falta' };
+    }],
+    ['ayuda', 'Atajos y cómo leer esto', renderAyuda, false, () => null],
+  ];
+
+  for (const [id, titulo, render, abiertaPorDefecto, resumir] of defs) {
+    const s = seccion(id, titulo, render, { resumir });
+    box.append(s.det);
+    // First visit: only the summary is open. After that his own choice wins, including the
+    // choice to close the summary — a panel that reopens what you closed is a panel you fight.
+    const guardada = localStorage.getItem(ABIERTAS) !== null;
+    s.det.open = guardada ? abiertas.has(id) : abiertaPorDefecto;
   }
 }
-
-const fallar = (err) => {
-  document.getElementById('error').textContent = 'Error: ' + err.message;
-};
 
 /**
  * Draws the page for the state the cache is actually in.
  *
- * With no accounts the reading sections are not rendered at all, rather than rendered and
- * allowed to fail: five 404s about an account nobody claimed exists are not five problems, and
- * showing them as errors buries the ONE thing to do behind noise.
+ * With no accounts the sections are not rendered at all, rather than rendered and allowed to
+ * fail: five 404s about an account nobody claimed exists are not five problems, and showing
+ * them as errors buries the ONE thing to do behind noise.
  */
 async function arrancar() {
-  const estado = await refrescar();
-  const vacia = estado !== null && estado.cuentas.length === 0;
-
-  document.getElementById('primera-vez').hidden = !vacia;
-  // Whole sections, heading included: hiding only the body would leave a column of empty
-  // headings, which reads as broken rather than as empty.
-  for (const node of document.querySelectorAll('section.solo-con-cuenta')) {
-    node.hidden = vacia;
+  let estado;
+  try {
+    estado = await api('/api/estado');
+  } catch (err) {
+    fallar(err);
+    return;
   }
+
+  const vacia = estado.cuentas.length === 0;
+  document.getElementById('primera-vez').hidden = !vacia;
+  document.getElementById('secciones').hidden = vacia;
+  document.getElementById('scope').hidden = vacia;
   if (vacia) {
+    document.getElementById('ahora').replaceChildren();
     renderPrimeraVez();
     return;
   }
 
-  renderSync();
-  renderPrep();
-  renderPendientes().catch(fallar);
-  renderMomentos().catch(fallar);
-  renderGraficos().catch(fallar);
-  renderCobertura().catch(fallar);
-  renderLedger().catch(fallar);
+  // The scope has to name a REAL account before anything is fetched with it, and the default
+  // comes from the server so the page and the API cannot disagree about which one that is.
+  if (!ALCANCE.cuenta || !estado.cuentas.some((c) => c.label === ALCANCE.cuenta)) {
+    ALCANCE.cuenta = estado.cuentaPorDefecto || estado.cuentas[0].label;
+    guardarAlcance();
+  }
+
+  renderAhora(estado.acciones);
+  // Whether this is the first paint decides who renders the open sections: on the first one
+  // armarSecciones opens them and the toggle handler paints, so repainting here would fetch
+  // every open section twice. On a re-run (an account switch, a finished sync) the sections
+  // already exist and stale bodies are exactly what has to be thrown away.
+  const primeraVez = !SECCIONES_ARMADAS;
+
+  try {
+    const f = await api('/api/filtros');
+    CAMPEONES = f.campeones;
+    renderScope(f);
+  } catch (err) { fallar(err); }
+
+  armarSecciones();
+  if (!primeraVez) for (const s of SECCIONES) s.redibujar();
+  await refrescarSecciones(estado);
+
+  // Tagging is the only input that cannot be recovered later, so it is the one section the
+  // page opens on its own — and only while there is actually something pending.
+  const pendientes = estado.cuentas.reduce((a, c) => a + c.pendientes, 0);
+  if (pendientes > 0) {
+    const s = SECCIONES.find((x) => x.id === 'taguear');
+    if (s && !s.det.open) s.det.open = true;
+  }
 }
 
-arrancar();
-// Every 60s, and only the panel — it reads the database and spends no Riot request, so polling
-// it cannot eat the rate limit the sync needs.
-// The poll refreshes the PANEL and deliberately not the tagging list. Re-rendering that list
-// under his hands would reset the buttons mid-ritual and lose his place; when new games arrive
-// the panel says so ("Taguear N partidas") and the list redraws after the next tag or sync.
-setInterval(() => { if (!document.hidden) refrescar(); }, 60000);
+/** The cheap refresh: state and badges only, no section is repainted under his hands. */
+async function refrescar() {
+  try {
+    const estado = await api('/api/estado');
+    renderAhora(estado.acciones);
+    await refrescarSecciones(estado);
+  } catch (err) { /* a background poll must never shout */ }
+}
+
+document.addEventListener('keydown', atajos);
+void arrancar();
+// Every 60s, and only the state and the badges — it reads the database and spends no Riot
+// request, so polling it cannot eat the rate limit the sync needs. It deliberately does NOT
+// repaint an open section: re-rendering the tag list under his hands would reset the buttons
+// mid-ritual and lose his place.
+setInterval(() => { if (!document.hidden && !syncCorriendo) void refrescar(); }, 60000);
+
 `;
 
+/**
+ * The document.
+ *
+ * The client script is injected RAW, and it has to be: inside a script element the HTML parser
+ * does not decode entities, so HTML-escaping the script turns every arrow function into an
+ * entity and the page loads a syntax error in silence — a blank panel with an empty console,
+ * which is exactly what happened the one time it was tried. There is nothing to escape anyway:
+ * the content is a compile-time constant, never user data. The one sequence that WOULD end the
+ * element early is a literal closing script tag, and a test asserts the script has none.
+ */
 export function renderShell(token: string | null): string {
   if (token === null) {
     return `<!doctype html>
@@ -772,6 +1745,8 @@ El token cambia en cada arranque, así que un favorito viejo no sirve.</p>
 </div></body></html>`;
   }
 
+  // The token is NOT written into the document: the script reads it from the address bar, so a
+  // screenshot of the page leaks nothing the URL bar does not already show.
   return `<!doctype html>
 <html lang="es">
 <head>
@@ -782,60 +1757,22 @@ El token cambia en cada arranque, así que un favorito viejo no sirve.</p>
 </head>
 <body>
 <div class="wrap">
-  <h1>lol</h1>
-  <p class="sub">Local, en tu máquina. Nada de esto sale de acá.</p>
-  <div id="error" class="dim"></div>
+  <div class="top">
+    <div class="fila">
+      <div class="marca">
+        <h1>lol</h1>
+        <p class="sub">Local, en tu máquina. Nada de esto sale de acá.</p>
+      </div>
+      <div class="scope" id="scope"></div>
+    </div>
+  </div>
 
   <div id="primera-vez" hidden></div>
-
-  <h2>Qué hacer ahora</h2>
-  <div id="acciones"></div>
-
-  <section class="solo-con-cuenta">
-    <h2>Sincronizar</h2>
-    <div id="sync"></div>
-  </section>
-
-  <section class="solo-con-cuenta">
-    <h2>Taguear</h2>
-    <div id="pendientes"></div>
-    <div id="tilt"></div>
-  </section>
-
-  <section class="solo-con-cuenta">
-    <h2>Lo que salió caro</h2>
-    <div id="momentos"></div>
-  </section>
-
-  <section class="solo-con-cuenta">
-    <h2>Antes de entrar</h2>
-    <div id="prep"></div>
-  </section>
-
-  <section class="solo-con-cuenta">
-    <h2>Curva y mapa</h2>
-    <div id="graficos"></div>
-  </section>
-
-  <section class="solo-con-cuenta">
-    <h2>De qué no puedo hablar todavía</h2>
-    <div id="cobertura"></div>
-  </section>
-
-  <section class="solo-con-cuenta">
-    <h2>Hipótesis registradas</h2>
-    <div id="ledger"></div>
-  </section>
-
-  <h2>Cuentas</h2>
-  <div id="cuentas"></div>
-
-  <h2>Key</h2>
-  <div id="key"></div>
+  <div id="ahora"></div>
+  <div id="secciones"></div>
 </div>
+<div class="avisos" id="avisos"></div>
 <script>${CLIENT_SCRIPT}</script>
 </body>
 </html>`;
 }
-
-export const escapeForTest = esc;
