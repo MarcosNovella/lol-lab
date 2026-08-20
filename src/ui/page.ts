@@ -1602,11 +1602,23 @@ async function renderCamino(box) {
         Math.round(c.winRate.valor * 100) + '% sobre ' + c.winRate.jugadas + ' partidas · ' +
         'podría estar entre ' + Math.round(c.winRate.bajo * 100) + '% y ' +
         Math.round(c.winRate.alto * 100) + '%'));
-      if (Number.isFinite(c.lp.breakEven)) {
+      // Measured and assumed are different claims and the card has to say which it is making.
+      // A default that looks like a measurement is the one thing worse than no number at all.
+      if (c.lp.origen === 'medido') {
         m.append(el('div', 'dim',
-          'Ganás +' + c.lp.porVictoria + ' LP y perdés −' + c.lp.porDerrota + ' LP, medido en ' +
-          c.lp.tramos + ' tramo(s) de TU reloj de rango. Tu punto de equilibrio es ' +
-          Math.round(c.lp.breakEven * 100) + '% (la marca amarilla).'));
+          'Ganás +' + c.lp.porVictoria + ' LP y perdés −' + c.lp.porDerrota + ' LP, MEDIDO sobre ' +
+          c.lp.tramos + ' tramo(s) de tu propio reloj de rango. Tu punto de equilibrio es ' +
+          Math.round(c.lp.breakEven * 100) + '% (la marca amarilla). Este número es tuyo: ' +
+          'depende de cuánto se aleja tu MMR de tu división, y se mueve mientras subís.'));
+      } else {
+        const aviso = el('div', 'warn');
+        aviso.textContent = 'SUPUESTO, no medido: estoy asumiendo ±' + c.lp.porVictoria +
+          ' LP por partida, que es lo normal para alguien cuyo MMR coincide con su división.';
+        m.append(aviso);
+        if (c.lp.porQueNo) m.append(el('div', 'dim', c.lp.porQueNo));
+        m.append(el('div', 'dim',
+          'En cuanto haya tres snapshots del reloj de rango esto pasa a medirse solo. Cada ' +
+          'sync anota uno cuando algo cambió, así que sincronizá después de cada sesión.'));
       }
       salida.append(m);
     }

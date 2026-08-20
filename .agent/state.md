@@ -429,7 +429,22 @@ partidas · optimista 44 · **pesimista: `null`, "con 39% no subís"**. Ese null
   `class="rep gano"` buscaba una regla llamada `.rep gano` y la encontraba por accidente.
   Corregido junto con el builder nuevo.
 
-verify verde, **373 tests** (351 → 373). Visto en Chromium, cero errores de consola.
+### S11b — la medición que no medía nada en su caché
+Preguntó si existía la sección de "cuántas partidas faltan". Existía, y **no le hubiera dado un
+número**: `lpMedido` sólo leía tramos donde se movió UN solo contador, que es el caso con una
+incógnita y una ecuación. Correcto, y sobre su caché real aplica a CERO tramos — el reloj se
+muestrea en un sync, un sync pasa después de una sesión, y una sesión son varias partidas.
+
+- Ahora ajusta **todos los tramos a la vez** por mínimos cuadrados: seis victorias y una derrota
+  siguen siendo una ecuación con dos incógnitas, pero tres tramos así ya no lo son. G-044.
+- Cuando aun así no hay ajuste (menos de dos tramos, tramos colineales, o un resultado fuera de
+  lo que el LP puede valer) usa un supuesto de ±20 **etiquetado**: `LpMedido.origen` viaja con la
+  respuesta y el panel lo pinta en amarillo. G-045.
+- Probado con sus tres snapshots reales: cae al supuesto y dice por qué ("el ajuste dio 79 LP por
+  victoria, fuera de rango"). 347 partidas a Diamante al ritmo supuesto, 68 si va bien, nunca si
+  va mal. Con el LP medido de verdad el central baja a ~96: por eso la etiqueta importa.
+
+verify verde, **377 tests** (351 → 377). Visto en Chromium, cero errores de consola.
 
 ## Open questions
 - **Diana**: closed by D3 as "the ledger decides", with the caveat that at n=5 needing 25, and 8

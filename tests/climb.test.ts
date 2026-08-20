@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   caminoA,
   intervaloWilson,
+  type LpMedido,
   lpAbsoluto,
   lpMedido,
   partidasPara,
@@ -56,6 +57,7 @@ describe('el LP por partida, medido de sus propios snapshots', () => {
       snap({ observedAt: 1, leaguePoints: 40, wins: 20, losses: 20 }),
       snap({ observedAt: 2, leaguePoints: 62, wins: 21, losses: 20 }),
       snap({ observedAt: 3, leaguePoints: 44, wins: 21, losses: 21 }),
+      snap({ observedAt: 4, leaguePoints: 66, wins: 22, losses: 21 }),
     ]);
     expect(m.porVictoria).toBe(22);
     expect(m.porDerrota).toBe(18);
@@ -63,23 +65,82 @@ describe('el LP por partida, medido de sus propios snapshots', () => {
     expect(m.breakEven).toBeCloseTo(18 / 40, 3);
   });
 
-  it('drops a pair where BOTH counters moved instead of averaging a guess into the answer', () => {
-    // Three wins and two losses across one LP gap is four unknowns and one equation.
+  it('fits across spans where BOTH counters moved, which is what a real cache looks like', () => {
+    // The rank clock is sampled on a sync, a sync happens after a session, and a session is
+    // several games — so on his actual cache almost every span has both counters moving. The
+    // first version of this read only single-game spans and therefore measured NOTHING on the
+    // data it was written for: the card existed and answered "no pude medir".
+    //
+    // Three wins and one loss is one equation with two unknowns; three such spans are not.
     const m = lpMedido([
-      snap({ observedAt: 1, leaguePoints: 40, wins: 20, losses: 20 }),
-      snap({ observedAt: 2, leaguePoints: 55, wins: 23, losses: 22 }),
+      snap({ observedAt: 1, division: 'II', leaguePoints: 10, wins: 20, losses: 20 }),
+      // 3 wins, 1 loss: 3*22 − 18 = +48
+      snap({ observedAt: 2, division: 'II', leaguePoints: 58, wins: 23, losses: 21 }),
+      // 1 win, 2 losses: 22 − 2*18 = −14
+      snap({ observedAt: 3, division: 'II', leaguePoints: 44, wins: 24, losses: 23 }),
+      // 2 wins: +44
+      snap({ observedAt: 4, division: 'II', leaguePoints: 88, wins: 26, losses: 23 }),
     ]);
-    expect(Number.isNaN(m.porVictoria)).toBe(true);
-    expect(m.tramos).toBe(1);
+    expect(m.origen).toBe('medido');
+    expect(m.porVictoria).toBeCloseTo(22, 0);
+    expect(m.porDerrota).toBeCloseTo(18, 0);
+    expect(m.tramos).toBe(3);
   });
 
   it('measures across a division boundary, where the naive LP difference goes negative', () => {
     const m = lpMedido([
       snap({ observedAt: 1, division: 'II', leaguePoints: 92, wins: 20, losses: 20 }),
+      // 92 → 14 looks like −78 and is in fact +22.
       snap({ observedAt: 2, division: 'I', leaguePoints: 14, wins: 21, losses: 20 }),
+      // 4 wins, 1 loss: 4*22 − 18 = +70
+      snap({ observedAt: 3, division: 'I', leaguePoints: 84, wins: 25, losses: 21 }),
+      // 2 losses: −36
+      snap({ observedAt: 4, division: 'I', leaguePoints: 48, wins: 25, losses: 23 }),
     ]);
-    // 92 → 14 looks like −78 and is in fact +22.
-    expect(m.porVictoria).toBe(22);
+    expect(m.origen).toBe('medido');
+    expect(m.porVictoria).toBeCloseTo(22, 0);
+  });
+
+  it('falls back to a STATED assumption rather than to nothing, and says which it is', () => {
+    // Refusing was correct and useless. A labelled default is a number he can act on; an
+    // unlabelled one would be a lie, which is why `origen` travels with every answer.
+    const m = lpMedido([snap({ observedAt: 1 })]);
+    expect(m.origen).toBe('supuesto');
+    expect(m.porVictoria).toBe(20);
+    expect(m.porQueNo).toContain('dos tramos');
+  });
+
+  it('refuses a fit whose spans all share the same win-to-loss ratio', () => {
+    // Collinear: the two unknowns are indistinguishable and there is no unique solution.
+    const m = lpMedido([
+      snap({ observedAt: 1, leaguePoints: 10, wins: 20, losses: 20 }),
+      snap({ observedAt: 2, leaguePoints: 14, wins: 21, losses: 21 }),
+      snap({ observedAt: 3, leaguePoints: 18, wins: 22, losses: 22 }),
+    ]);
+    expect(m.origen).toBe('supuesto');
+    expect(m.porQueNo).toContain('misma proporción');
+  });
+
+  it('refuses a fit that lands outside what LP can actually be worth', () => {
+    // Arithmetic that solved the equations and described nothing. Printing it would be worse
+    // than the default: a wrong number wearing the word "medido".
+    const m = lpMedido([
+      snap({ observedAt: 1, division: 'II', leaguePoints: 10, wins: 20, losses: 20 }),
+      snap({ observedAt: 2, division: 'II', leaguePoints: 12, wins: 21, losses: 20 }),
+      snap({ observedAt: 3, division: 'II', leaguePoints: 90, wins: 22, losses: 22 }),
+    ]);
+    expect(m.origen).toBe('supuesto');
+    expect(m.porQueNo).toContain('fuera de lo que el LP puede valer');
+  });
+
+  it('ignores a span with no games, and one where the counters went backwards', () => {
+    // Backwards means the counters were reset — a new season, not a game.
+    const m = lpMedido([
+      snap({ observedAt: 1, leaguePoints: 10, wins: 20, losses: 20 }),
+      snap({ observedAt: 2, leaguePoints: 10, wins: 20, losses: 20 }),
+      snap({ observedAt: 3, leaguePoints: 30, wins: 2, losses: 1 }),
+    ]);
+    expect(m.tramos).toBe(0);
   });
 
   it('refuses to mix apex LP with division LP, which are different quantities', () => {
@@ -127,7 +188,14 @@ describe('el intervalo de Wilson', () => {
 });
 
 describe('las partidas que faltan', () => {
-  const lp = { porVictoria: 22, porDerrota: 18, tramos: 5, breakEven: 0.45 };
+  const lp: LpMedido = {
+    porVictoria: 22,
+    porDerrota: 18,
+    tramos: 5,
+    breakEven: 0.45,
+    origen: 'medido',
+    porQueNo: null,
+  };
 
   it('divides the LP gap by what a game is actually worth at that rate', () => {
     // At 60%: 0.6*22 − 0.4*18 = 6 LP a game. 300 LP is exactly 50 games, and it has to come

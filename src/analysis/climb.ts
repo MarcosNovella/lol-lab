@@ -80,32 +80,63 @@ export function lpAbsoluto(snapshot: {
 }
 
 export type LpMedido = {
-  /** Mean LP gained per win, measured from his snapshots. NaN when nothing could be measured. */
+  /** Mean LP gained per win. NaN when nothing could be measured. */
   porVictoria: number;
   /** Mean LP lost per loss, as a POSITIVE number. NaN when nothing could be measured. */
   porDerrota: number;
-  /** Snapshot pairs the measurement rests on. Small n here means the numbers are provisional. */
+  /** Snapshot spans the fit rests on. Two is the minimum and it is an exact solve, not a fit. */
   tramos: number;
   /** The win rate at which LP stops moving: perdida / (ganada + perdida). */
   breakEven: number;
+  /**
+   * Where the numbers came from, because the answer changes what the reader should believe.
+   * `medido` is his own ladder; `supuesto` is a stated default and the card must say so.
+   */
+  origen: 'medido' | 'supuesto';
+  /** Why it fell back, when it did. Null when the fit worked. */
+  porQueNo: string | null;
 };
 
 /**
- * LP per win and per loss, read off consecutive rank snapshots.
+ * What a win and a loss are worth when his own snapshots cannot say.
  *
- * The rank clock deduplicates on VALUE, so two consecutive rows differ in something, and between
- * them `wins` and `losses` say how many games happened. A pair where BOTH counters moved cannot
- * be attributed — three wins and two losses over one LP gap is four unknowns and one equation —
- * so those pairs are dropped rather than averaged into the answer.
+ * A STATED ASSUMPTION, never presented as a measurement. Around twenty each is the ladder's
+ * ordinary shape for someone whose MMR matches their division, which makes it the least-wrong
+ * placeholder and still wrong for anybody who is climbing or stuck. The card labels it, and it
+ * is replaced by the real thing as soon as three snapshots exist.
+ */
+export const LP_SUPUESTO = { porVictoria: 20, porDerrota: 20 };
+
+/**
+ * Plausible bounds for LP per game. Outside them the fit found noise, not a ladder.
  *
- * Pairs that cross a DIVISION are kept, because `lpAbsoluto` makes the gap continuous; pairs
- * that cross into an apex tier are dropped, since LP there is a different quantity.
+ * Riot's range is roughly 10 to 40 depending on how far MMR sits from the division. A fit that
+ * lands outside is arithmetic that solved the equations and described nothing, and printing it
+ * would be worse than the honest default — it would be a wrong number wearing the word "medido".
+ */
+const LP_MIN = 5;
+const LP_MAX = 60;
+
+/**
+ * LP per win and per loss, fitted across every span between rank snapshots.
+ *
+ * The first version of this only used spans where exactly ONE counter moved — a single win, or a
+ * single loss — because that is the case with one unknown and one equation. It was correct and
+ * useless: the rank clock is sampled on a sync, syncs happen after a session, and a session is
+ * several games, so on a real cache almost every span has both counters moving and the honest
+ * version measured nothing at all. The feature existed and answered "no pude medir".
+ *
+ * A span with six wins and one loss is still one equation with two unknowns; THREE such spans
+ * are an overdetermined system, and least squares solves it. Same discipline, more of the data:
+ * nothing is assumed, the spans just get read together instead of one at a time.
+ *
+ * Refuses rather than guesses in the two cases where the fit is meaningless: a system whose
+ * spans all share the same win-to-loss ratio (collinear, no unique solution), and a solution
+ * outside the range LP can actually take.
  */
 export function lpMedido(snapshots: RankSnapshot[]): LpMedido {
   const orden = [...snapshots].sort((a, b) => a.observedAt - b.observedAt);
-  const ganancias: number[] = [];
-  const perdidas: number[] = [];
-  let tramos = 0;
+  const spans: { w: number; l: number; delta: number }[] = [];
 
   for (let i = 1; i < orden.length; i += 1) {
     const antes = orden[i - 1];
@@ -119,28 +150,73 @@ export function lpMedido(snapshots: RankSnapshot[]): LpMedido {
       t !== null && TIERS.indexOf(t.toUpperCase() as Tier) >= TIERS.indexOf('MASTER');
     if (apex(antes.tier) || apex(ahora.tier)) continue;
 
-    const dW = (ahora.wins ?? 0) - (antes.wins ?? 0);
-    const dL = (ahora.losses ?? 0) - (antes.losses ?? 0);
-    const delta = b - a;
-    tramos += 1;
-    // Attributable only when exactly one side moved. Anything else is more unknowns than
-    // equations, and averaging it in is how a made-up number gets an honest-looking mean.
-    if (dW > 0 && dL === 0) ganancias.push(delta / dW);
-    else if (dL > 0 && dW === 0) perdidas.push(-delta / dL);
+    const w = (ahora.wins ?? 0) - (antes.wins ?? 0);
+    const l = (ahora.losses ?? 0) - (antes.losses ?? 0);
+    // A span with no games in it carries no information about what a game is worth, and a
+    // negative one means the counters were reset — a new season, not a game.
+    if (w < 0 || l < 0 || w + l === 0) continue;
+    spans.push({ w, l, delta: b - a });
   }
 
-  const media = (xs: number[]): number =>
-    xs.length === 0 ? Number.NaN : xs.reduce((s, x) => s + x, 0) / xs.length;
-  const porVictoria = media(ganancias);
-  const porDerrota = media(perdidas);
+  const fallback = (porQue: string): LpMedido => ({
+    ...LP_SUPUESTO,
+    tramos: spans.length,
+    breakEven: round(
+      LP_SUPUESTO.porDerrota / (LP_SUPUESTO.porVictoria + LP_SUPUESTO.porDerrota),
+      3,
+    ),
+    origen: 'supuesto',
+    porQueNo: porQue,
+  });
+
+  if (spans.length < 2) {
+    return fallback(
+      `Hacen falta al menos dos tramos del reloj de rango y hay ${spans.length}. ` +
+        'Cada sync anota uno cuando algo cambió.',
+    );
+  }
+
+  // Least squares on delta = w*G - l*L, through the origin: a span with no games moves no LP.
+  let A = 0;
+  let B = 0;
+  let C = 0;
+  let P = 0;
+  let Q = 0;
+  for (const { w, l, delta } of spans) {
+    A += w * w;
+    B += w * l;
+    C += l * l;
+    P += w * delta;
+    Q += l * delta;
+  }
+  const det = B * B - A * C;
+  // Collinear spans — every one with the same win-to-loss ratio — leave the two unknowns
+  // indistinguishable. There is no unique answer and inventing one is the whole thing this
+  // module refuses to do.
+  if (Math.abs(det) < 1e-9) {
+    return fallback(
+      'Todos los tramos tienen la misma proporción de victorias y derrotas, así que no se ' +
+        'puede separar cuánto vale una de cuánto vale la otra.',
+    );
+  }
+  const G = (-P * C + B * Q) / det;
+  const L = (A * Q - B * P) / det;
+
+  if (!Number.isFinite(G) || !Number.isFinite(L)) return fallback('El ajuste no dio un número.');
+  if (G < LP_MIN || G > LP_MAX || L < LP_MIN || L > LP_MAX) {
+    return fallback(
+      `El ajuste dio ${G.toFixed(0)} LP por victoria y ${L.toFixed(0)} por derrota, que está ` +
+        'fuera de lo que el LP puede valer. Con más tramos se acomoda.',
+    );
+  }
+
   return {
-    porVictoria: round(porVictoria, 1),
-    porDerrota: round(porDerrota, 1),
-    tramos,
-    breakEven:
-      Number.isFinite(porVictoria) && Number.isFinite(porDerrota) && porVictoria + porDerrota > 0
-        ? round(porDerrota / (porVictoria + porDerrota), 3)
-        : Number.NaN,
+    porVictoria: round(G, 1),
+    porDerrota: round(L, 1),
+    tramos: spans.length,
+    breakEven: round(L / (G + L), 3),
+    origen: 'medido',
+    porQueNo: null,
   };
 }
 
@@ -233,16 +309,20 @@ export function caminoA(
           ...intervaloWilson(registro.ganadas, registro.jugadas),
         };
 
-  if (lp.tramos < 3) {
+  if (lp.origen === 'supuesto') {
+    // Loudly, and first: with an assumed ±20 the break-even is exactly 50%, and at 52.6% that
+    // is barely one LP a game — four hundred games to Diamond. Measured at +24/−17 the same win
+    // rate is three LP a game and ninety-six games. The label is not a formality: the assumption
+    // changes the answer by a factor of four.
     advertencias.push(
-      `El LP por partida sale de ${lp.tramos} tramo(s) del reloj de rango. Corré \`lol rank\` ` +
-        'seguido: con pocos tramos estos números son provisorios.',
+      `El LP por partida es un SUPUESTO de ±${lp.porVictoria}, no una medición. ${lp.porQueNo ?? ''} ` +
+        'Con el número real esta cuenta puede cambiar por un factor de cuatro, así que leelo ' +
+        'como un orden de magnitud y no como un plan.',
     );
-  }
-  if (!Number.isFinite(lp.porVictoria) || !Number.isFinite(lp.porDerrota)) {
+  } else if (lp.tramos < 4) {
     advertencias.push(
-      'No pude medir tu LP por victoria o por derrota: hacen falta dos snapshots donde se haya ' +
-        'movido sólo el contador de ganadas, o sólo el de perdidas.',
+      `El LP por partida se ajustó sobre ${lp.tramos} tramos del reloj de rango, que es poco. ` +
+        'Cada sync anota uno cuando algo cambió, así que se afina solo a medida que jugás.',
     );
   }
   if (winRate !== null && winRate.jugadas < 30) {

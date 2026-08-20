@@ -181,9 +181,16 @@ con un número confiado. Un winrate medido sobre cincuenta partidas tiene un int
 catorce puntos, y esa es la diferencia entre "sesenta partidas" y "con este winrate no subís".
 Acá están los tres, y el pesimista tiene permitido decir que no.
 
-Además el **LP por victoria y por derrota está medido de tus propios snapshots**, no asumido en
-veinte: depende de la distancia entre tu MMR y tu división, se mueve mientras subís, y es toda la
-diferencia entre "45% es equilibrio" y "necesitás 52% sólo para mantenerte".
+Además el **LP por victoria y por derrota sale de tus propios snapshots de rango**, no de un
+veinte de manual: depende de la distancia entre tu MMR y tu división, se mueve mientras subís, y
+es toda la diferencia entre "45% es equilibrio" y "necesitás 52% sólo para mantenerte". Se ajusta
+sobre todos los tramos del reloj a la vez, así que sirve aunque entre dos snapshots hayas jugado
+seis partidas — que es lo que pasa siempre.
+
+Cuando no alcanza para medirlo (menos de dos tramos, o un ajuste que da un número imposible), la
+tarjeta usa un supuesto de ±20 **y lo dice en amarillo**. La diferencia no es cosmética: con ±20
+el equilibrio es 50% clavado y un 53% son cuatrocientas partidas hasta Diamante; con un +24/−17
+medido, el mismo winrate son noventa y seis.
 
 ## Cómo se arma el benchmark
 
