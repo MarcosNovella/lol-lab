@@ -12,12 +12,14 @@ import { renderShell } from './page.ts';
 import {
   abrirSesion,
   alcanceDe,
+  camino,
   cerrarSesion,
   cobertura,
   cuentaPorDefecto,
   dejarAtras,
   estado,
   filtros,
+  firma,
   graficos,
   ledger,
   momentos,
@@ -367,6 +369,21 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
     }
     if (url.pathname === '/api/filtros') {
       json(response, 200, filtros(db, cuenta));
+      return;
+    }
+    if (url.pathname === '/api/firma') {
+      json(
+        response,
+        200,
+        firma(db, alcance, {
+          campeon: url.searchParams.get('campeon'),
+          rival: url.searchParams.get('rival'),
+        }),
+      );
+      return;
+    }
+    if (url.pathname === '/api/camino') {
+      json(response, 200, camino(db, alcance, url.searchParams.get('objetivo') ?? 'DIAMOND'));
       return;
     }
     if (url.pathname === '/api/runas') {

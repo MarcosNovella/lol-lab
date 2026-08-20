@@ -378,6 +378,59 @@ Correr una vez: `pnpm lol catalogos` y `pnpm lol assets`. Todo lo de S10 se veri
 partidas sintéticas con varianza cero — la forma está probada, los números todavía no dijeron
 nada. La vista que nunca existió y que miraría primero es *Cómo viene* sin filtrar por rol.
 
+## S11 2026-08-20, CLOUD — las dos cosas que op.gg no puede hacer
+
+Pedido: que sea de verdad superior a op.gg o Mobalytics, personalizado para mejorar en mid y
+llegar a Diamante o Maestro. La respuesta no fue una lista de features: fueron las dos cosas que
+esas herramientas **estructuralmente** no pueden hacer, porque no tienen sus timelines ni su
+historial de rango.
+
+### La forma del matchup (ADR-027)
+`src/analysis/signature.ts` + `signatureSvg`. El oro contra su rival de línea en cada minuto
+muestreado, promediado sobre TODAS sus reps, dibujado como cada partida en gris con el promedio
+encima — la forma de ÉNFASIS, y es el argumento, no la decoración.
+
+op.gg sabe el winrate de Diana contra Zed sobre diez mil partidas y no tiene un solo timeline.
+"Estás +100 a los 14 y la diferencia recién se abre después del 20" no es una frase que pueda
+producir. El winrate dice que el matchup es difícil; la forma dice DÓNDE se rompe.
+
+Tres decisiones para que no sea la mentira habitual de un promedio:
+- **n POR MINUTO.** Las partidas terminan: quince a los 5′ y diez a los 30′ son dos muestras en
+  una línea. El promedio se AFINA donde baja la n y cada tick imprime la suya.
+- **Cada rep viaja al cliente.** Un promedio de ocho partidas con 2000 de dispersión y ocho que
+  hicieron lo mismo son el mismo número y hechos distintos. Se dibuja en vez de describirse.
+- **El peor tramo se atribuye a la MENOR de sus dos n**, porque una caída hacia un punto flaco es
+  un hecho sobre el punto flaco.
+Nada de esto está en el ledger y el panel lo dice: es la descripción de un dibujo.
+
+### El camino, con tres números (ADR-028)
+`src/analysis/climb.ts`. Winrate medido + los dos extremos de su intervalo de Wilson.
+
+Sobre la caché sintética: Platino I 38 LP, faltan 462 LP. **+24.2 / −17.3 LP medidos de sus
+propios snapshots**, equilibrio 41.7%. Winrate 53.3% n=45, intervalo 39.1–67.1%. Central 96
+partidas · optimista 44 · **pesimista: `null`, "con 39% no subís"**. Ese null es la feature.
+
+- El LP por partida sale del reloj de rango, no de un 20 de manual: depende de la distancia entre
+  su MMR y su división y se mueve mientras sube. Ninguna app lo sabe porque ninguna muestrea su
+  rango en un reloj; este proyecto sí, en cada sync, deduplicado por valor.
+- Un par de snapshots donde se movieron LOS DOS contadores se descarta: tres victorias y dos
+  derrotas sobre un salto de LP son cuatro incógnitas y una ecuación.
+- Wilson y no la aproximación normal, que da cotas fuera de [0,1] justo con muestra chica — una
+  barra que arranca en −4% haría que la mitad honesta de la tarjeta parezca un bug.
+
+### Bugs
+- **G-043**: `partidasPara(300, 0.6, +22/−18)` son exactamente 50 partidas y devolvía 51.
+  `0.6*22 − 0.4*18` es 5.999999999999999 en flotante, así que el cociente es 50.00000000000001 y
+  el ceil suma una. Una partida de más, en el número principal de la tarjeta.
+- **G-042**: el agregado sobre una serie que se ENCOGE tiene que llevar su n por punto y el
+  dibujo tiene que mostrarlo. Hermano de G-017, que era el mismo error sobre los frames de una
+  partida en vez de sobre un corpus.
+- El test de G-023 (toda clase emitida tiene regla) no partía las clases compuestas, así que
+  `class="rep gano"` buscaba una regla llamada `.rep gano` y la encontraba por accidente.
+  Corregido junto con el builder nuevo.
+
+verify verde, **373 tests** (351 → 373). Visto en Chromium, cero errores de consola.
+
 ## Open questions
 - **Diana**: closed by D3 as "the ledger decides", with the caveat that at n=5 needing 25, and 8
   games since he last played her, it may never reach n.

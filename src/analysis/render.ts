@@ -171,6 +171,95 @@ ${ticks}
 }
 
 /**
+ * The matchup signature: every rep in grey, the mean on top.
+ *
+ * This is the EMPHASIS form, and it is the point of the drawing rather than its decoration. A
+ * mean of eight games and a mean of eight games that all did the same thing are the same number
+ * and different facts, so the individual curves are drawn instead of a standard deviation being
+ * described in a caption nobody reads. What he sees is whether the shape is a shape.
+ *
+ * The mean line THINS where its `n` drops: games end, so the tail of a matchup curve is a
+ * different and smaller sample than its head, and a line of constant weight says the opposite.
+ */
+export function signatureSvg(
+  curvas: { puntos: { minute: number; goldDiff: number }[]; win: boolean }[],
+  media: { minute: number; goldDiff: number; n: number }[],
+  width = 520,
+  height = 210,
+): string {
+  if (media.length === 0) {
+    return `<svg viewBox="0 0 ${width} ${height}" width="100%"><text class="tag" x="8" y="20">sin partidas medibles</text></svg>`;
+  }
+
+  const pad = 30;
+  const minutos = media.map((p) => p.minute);
+  const maxMinute = Math.max(...minutos);
+  const todos = [
+    ...curvas.flatMap((c) => c.puntos.map((p) => p.goldDiff)),
+    ...media.map((p) => p.goldDiff),
+  ];
+  const extent = Math.max(500, ...todos.map((v) => Math.abs(v)));
+  const x = (minute: number): number => pad + (minute / maxMinute) * (width - pad * 2);
+  const y = (gold: number): number => height / 2 - (gold / extent) * (height / 2 - pad / 2);
+  const nMax = Math.max(...media.map((p) => p.n));
+
+  const fondo = curvas
+    .map((c) => {
+      if (c.puntos.length < 2) return '';
+      const pts = c.puntos
+        .map((p) => `${x(p.minute).toFixed(1)},${y(p.goldDiff).toFixed(1)}`)
+        .join(' ');
+      return `<polyline class="rep ${c.win ? 'gano' : 'perdio'}" points="${pts}"/>`;
+    })
+    .filter((l) => l !== '')
+    .join('\n');
+
+  // One segment per gap so each can carry its own weight. A single polyline cannot thin.
+  const tramos = media
+    .slice(1)
+    .map((p, i) => {
+      const a = media[i];
+      if (a === undefined) return '';
+      const n = Math.min(a.n, p.n);
+      const grosor = (1.2 + 2.3 * (n / nMax)).toFixed(2);
+      return `<line class="media" x1="${x(a.minute).toFixed(1)}" y1="${y(a.goldDiff).toFixed(1)}" x2="${x(p.minute).toFixed(1)}" y2="${y(p.goldDiff).toFixed(1)}" stroke-width="${grosor}"/>`;
+    })
+    .filter((l) => l !== '')
+    .join('\n');
+
+  const puntos = media
+    .map(
+      (p) =>
+        `<circle class="mediaPunto" cx="${x(p.minute).toFixed(1)}" cy="${y(p.goldDiff).toFixed(1)}" r="4"><title>${esc(
+          `${p.minute}′ ${p.goldDiff >= 0 ? '+' : ''}${p.goldDiff} de oro · ${p.n} partida${p.n === 1 ? '' : 's'}`,
+        )}</title></circle>` +
+        `<circle class="hit" cx="${x(p.minute).toFixed(1)}" cy="${y(p.goldDiff).toFixed(1)}" r="12" data-minuto="${p.minute}" data-oro="${p.goldDiff}" data-n="${p.n}"/>`,
+    )
+    .join('\n');
+
+  // The n under each tick, because the denominator changing along the axis is the one thing a
+  // reader cannot infer from the drawing and the one most likely to mislead them.
+  const ticks = media
+    .map(
+      (p) =>
+        `<text class="tag" x="${x(p.minute).toFixed(1)}" y="${height - 14}" text-anchor="middle">${p.minute}′</text>` +
+        `<text class="tag dim" x="${x(p.minute).toFixed(1)}" y="${height - 3}" text-anchor="middle">n=${p.n}</text>`,
+    )
+    .join('\n');
+
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="Firma del matchup">
+  <line class="zero" x1="${pad}" y1="${height / 2}" x2="${width - pad}" y2="${height / 2}"/>
+  <text class="tag" x="4" y="${height / 2 - 4}">0</text>
+  <text class="tag" x="4" y="${pad / 2 + 4}">+${extent.toFixed(0)}</text>
+  <text class="tag" x="4" y="${height - pad}">-${extent.toFixed(0)}</text>
+${fondo}
+${tramos}
+${puntos}
+${ticks}
+</svg>`;
+}
+
+/**
  * The CSS the SVG builders REQUIRE, and the variables it reads.
  *
  * Exported and shared, not copied. The builders emit `class="plot"`, `class="own"` and so on and
@@ -181,6 +270,17 @@ ${ticks}
  * the builders emit has a rule here.
  */
 export const SVG_STYLE = `
+/* The signature. Every rep in the de-emphasis grey, the mean on top: it is the emphasis form,
+   and the greys are what turn a mean into a shape somebody can judge. Win and loss are kept
+   apart by a hair of tint only — the reading here is the SHAPE, and colouring the reps by result
+   would invite reading the picture as "these are the ones I won". */
+.rep { fill: none; stroke: #3a4152; stroke-width: 1; opacity: .55; }
+.rep.gano { stroke: #40584a; }
+.rep.perdio { stroke: #58414a; }
+.media { stroke: var(--fg); stroke-linecap: round; }
+.mediaPunto { fill: var(--fg); }
+text.tag.dim { opacity: .55; }
+
 /* Invisible hit targets. Without a rule they render as black discs over the whole chart — the
    builders carry no presentation of their own, which is exactly the G-023 trap. */
 .hit { fill: transparent; cursor: crosshair; }

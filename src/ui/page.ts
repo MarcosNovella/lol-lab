@@ -268,6 +268,26 @@ input:focus, select:focus, button:focus-visible, summary:focus-visible {
 .svgbox { overflow-x: auto; }
 .filtros { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
 
+/* --------------------------------------------------------------- el camino
+   Three projections side by side, because one is a lie. The pessimistic one is deliberately
+   not styled as an error: "at this rate you do not climb" is a result, not a failure. */
+.camino { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.proy { background: var(--card-2); border: 1px solid var(--line-soft); border-radius: var(--r);
+        padding: 12px; }
+.proy.central { border-color: #3d5384; background: #1b2334; }
+.proy .k { color: var(--faint); font-size: 11px; text-transform: uppercase;
+           letter-spacing: .06em; display: block; }
+.proy .v { font-size: 26px; font-weight: 600; letter-spacing: -.02em; display: block;
+           margin: 3px 0 1px; }
+.proy .u { color: var(--dim); font-size: 12px; }
+.proy .nunca { font-size: 15px; font-weight: 600; color: var(--warn); display: block;
+               margin: 8px 0 2px; line-height: 1.3; }
+.medidor { height: 8px; background: #0b0d11; border-radius: 4px; overflow: hidden;
+           margin: 8px 0 4px; position: relative; }
+.medidor > i { position: absolute; top: 0; bottom: 0; background: #3d5384; }
+.medidor > b { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); }
+.medidor > u { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--warn); }
+
 /* ------------------------------------------------------------------- tooltip
    A chart in a browser IS interactive, and the native <svg><title> is not that: it waits most
    of a second and it cannot be styled. This one follows the pointer and shows every dimension
@@ -1380,14 +1400,20 @@ function engancharTooltip(caja) {
 
   const mostrar = (hit, evento) => {
     const oro = Number(hit.dataset.oro);
-    const cs = Number(hit.dataset.cs);
-    const xp = Number(hit.dataset.xp);
-    const firma = (n, sufijo) => (n > 0 ? '+' : '') + n + (sufijo || '');
+    const signo = (n) => (n > 0 ? '+' : '') + n;
     tip.replaceChildren();
     tip.append(el('div', null, hit.dataset.minuto + ' minutos'));
     const linea = el('div');
-    linea.append(el('span', oro >= 0 ? 'ok' : 'bad', firma(oro) + ' de oro'));
-    linea.append(el('span', 'm', '   ' + firma(cs) + ' cs   ' + firma(xp) + ' xp'));
+    linea.append(el('span', oro >= 0 ? 'ok' : 'bad', signo(oro) + ' de oro'));
+    // One builder carries cs and xp (a single game); the other carries n (a mean over games).
+    // The tooltip reads whichever is there rather than printing NaN for the other's fields.
+    if (hit.dataset.n !== undefined) {
+      linea.append(el('span', 'm', '   promedio de ' + hit.dataset.n + ' partida' +
+        (hit.dataset.n === '1' ? '' : 's')));
+    } else {
+      linea.append(el('span', 'm', '   ' + signo(Number(hit.dataset.cs)) + ' cs   ' +
+        signo(Number(hit.dataset.xp)) + ' xp'));
+    }
     tip.append(linea);
     tip.hidden = false;
     // Offset so the cursor never sits on top of the thing it is pointing at, and flipped near
@@ -1489,6 +1515,117 @@ async function renderLedger(box) {
     card.append(el('div', 'alcance', 'cautela: ' + h.cautela));
     box.append(card);
   }
+}
+
+/* ---------------------------------------------------------------- el camino
+   Every site with a climb calculator answers "how many games to Diamond" with one confident
+   number. This one answers with three, because at fifty games the win-rate interval is about
+   fourteen points wide and that is the difference between "sixty games away" and "this win rate
+   does not climb at all". */
+const OBJETIVOS = [['DIAMOND', 'Diamante'], ['MASTER', 'Maestro'], ['EMERALD', 'Esmeralda']];
+let OBJETIVO = 'DIAMOND';
+
+function tarjetaProyeccion(titulo, proy, clase) {
+  const caja = el('div', 'proy' + (clase ? ' ' + clase : ''));
+  caja.append(el('span', 'k', titulo));
+  if (proy === null) {
+    caja.append(el('span', 'u', 'sin datos'));
+    return caja;
+  }
+  if (proy.partidas === null) {
+    // Not an error and not styled as one: "at this rate the ladder is a treadmill" is a result.
+    caja.append(el('span', 'nunca', 'no subís'));
+    caja.append(el('span', 'u', 'con ' + Math.round(proy.winRate * 100) +
+      '% no alcanza para compensar lo que perdés'));
+    return caja;
+  }
+  caja.append(el('span', 'v nums', String(proy.partidas)));
+  caja.append(el('span', 'u', 'partidas al ' + Math.round(proy.winRate * 100) + '%'));
+  return caja;
+}
+
+async function renderCamino(box) {
+  const sel = el('select');
+  for (const [valor, label] of OBJETIVOS) {
+    const o = el('option', null, label);
+    o.value = valor;
+    sel.append(o);
+  }
+  sel.value = OBJETIVO;
+  const fila = el('div', 'filtros');
+  fila.append(el('span', 'faint', 'objetivo:'), sel);
+  box.append(fila);
+
+  const salida = el('div');
+  box.append(salida);
+
+  const cargar = async () => {
+    salida.replaceChildren(el('div', 'vacio', 'calculando…'));
+    const c = await api('/api/camino', { objetivo: OBJETIVO });
+    salida.replaceChildren();
+
+    if (c.desde === null) {
+      salida.append(el('div', 'vacio',
+        'No hay ningún snapshot de rango para esta cuenta. Corré lol rank, o sincronizá: ' +
+        'el reloj de rango se anota en cada sync.'));
+      return;
+    }
+
+    const cab = el('div', 'card plano');
+    cab.append(el('div', 't', 'dónde estás'));
+    const hero = el('div', 'hero-fila');
+    hero.append(el('div', null, c.desde.texto));
+    hero.append(el('div', 'faint', '→ ' + c.hasta.texto +
+      (c.faltanLp === null ? '' : '  ·  ' + c.faltanLp + ' LP arriba')));
+    cab.append(hero);
+    salida.append(cab);
+
+    if (c.winRate) {
+      const m = el('div', 'card plano');
+      m.append(el('div', 't', 'tu winrate, con lo ancho que es de verdad'));
+      // The bar IS the argument: the point estimate is a tick inside a band, and break-even is
+      // a second tick. Seeing the band overlap break-even is the whole message.
+      const medidor = el('div', 'medidor');
+      const banda = document.createElement('i');
+      banda.style.left = (c.winRate.bajo * 100) + '%';
+      banda.style.width = ((c.winRate.alto - c.winRate.bajo) * 100) + '%';
+      const punto = document.createElement('b');
+      punto.style.left = (c.winRate.valor * 100) + '%';
+      medidor.append(banda, punto);
+      if (Number.isFinite(c.lp.breakEven)) {
+        const be = document.createElement('u');
+        be.style.left = (c.lp.breakEven * 100) + '%';
+        medidor.append(be);
+      }
+      m.append(medidor);
+      m.append(el('div', 'nums',
+        Math.round(c.winRate.valor * 100) + '% sobre ' + c.winRate.jugadas + ' partidas · ' +
+        'podría estar entre ' + Math.round(c.winRate.bajo * 100) + '% y ' +
+        Math.round(c.winRate.alto * 100) + '%'));
+      if (Number.isFinite(c.lp.breakEven)) {
+        m.append(el('div', 'dim',
+          'Ganás +' + c.lp.porVictoria + ' LP y perdés −' + c.lp.porDerrota + ' LP, medido en ' +
+          c.lp.tramos + ' tramo(s) de TU reloj de rango. Tu punto de equilibrio es ' +
+          Math.round(c.lp.breakEven * 100) + '% (la marca amarilla).'));
+      }
+      salida.append(m);
+    }
+
+    salida.append(el('h3', null, 'cuántas partidas'));
+    const grid = el('div', 'camino');
+    grid.append(tarjetaProyeccion('si vas mal', c.pesimista, ''));
+    grid.append(tarjetaProyeccion('al ritmo medido', c.central, 'central'));
+    grid.append(tarjetaProyeccion('si vas bien', c.optimista, ''));
+    salida.append(grid);
+    salida.append(el('div', 'alcance',
+      'Tres y no una a propósito: un winrate medido sobre ' +
+      (c.winRate ? c.winRate.jugadas : '?') + ' partidas tiene un intervalo enorme, y la ' +
+      'diferencia entre las puntas es la diferencia entre un objetivo y una ilusión.'));
+    for (const a of c.advertencias) salida.append(el('div', 'alcance', '· ' + a));
+  };
+
+  sel.onchange = () => { OBJETIVO = sel.value; void cargar(); };
+  await cargar();
 }
 
 /* ------------------------------------------------------------------ runas y clases
@@ -1681,6 +1818,10 @@ async function renderPrep(box) {
         'peso ' + e.peso + ': ' + pct(e.winRate) + ' (' + pct(e.propio) + ' tuyo)').join('   ')));
       card.append(el('div', 'alcance', 'confianza: ' + p.confianza));
       salida.append(card);
+
+      // The part no aggregator can produce. A win rate says the matchup is hard; the shape says
+      // WHERE it breaks, and that is the half he can act on before the next game.
+      await pintarFirma(salida, mio.value, suyo.value.trim());
     } catch (err) {
       salida.replaceChildren(el('div', 'vacio', 'No se pudo: ' + err.message));
     }
@@ -1688,6 +1829,60 @@ async function renderPrep(box) {
   boton.onclick = consultar;
   suyo.onkeydown = (e) => { if (e.key === 'Enter') void consultar(); };
   salida.append(el('div', 'vacio', 'Elegí tu campeón y escribí el rival.'));
+}
+
+/**
+ * The matchup's shape across every rep of it.
+ *
+ * Deliberately drawn as every game in grey with the mean on top, rather than a mean and a
+ * caption about its spread: a mean of eight games with a two-thousand-gold spread and a mean of
+ * eight games that all did the same thing are the same number and different facts. The reader
+ * gets to see which one this is.
+ */
+async function pintarFirma(box, campeon, rival) {
+  let f;
+  try {
+    f = await api('/api/firma', { campeon: campeon, rival: rival });
+  } catch (err) {
+    box.append(el('div', 'vacio', 'No se pudo dibujar la forma: ' + err.message));
+    return;
+  }
+  if (f.juegos === 0) {
+    box.append(el('div', 'vacio',
+      'Todavía no hay ninguna partida de este matchup CON timeline, así que no hay forma que ' +
+      'dibujar.' + (f.sinTimeline > 0 ? ' Hay ' + f.sinTimeline + ' sin timeline: sincronizá.' : '')));
+    return;
+  }
+
+  const card = el('div', 'card plano');
+  card.append(el('div', 't', 'la forma del matchup — oro contra tu rival, minuto a minuto'));
+  card.append(el('div', 'hint',
+    f.juegos + ' rep' + (f.juegos === 1 ? '' : 's') + ' con timeline · ' + f.ganadas + ' ganadas · ' +
+    f.lectura));
+  const caja = el('div', 'svgbox');
+  caja.innerHTML = f.svg;
+  card.append(caja);
+  card.append(el('div', 'faint',
+    'Cada línea gris es una partida. La blanca es el promedio, y se afina donde hay menos ' +
+    'partidas: las que terminan antes no llegan al final del eje.'));
+
+  if (f.peorTramo && f.peorTramo.delta < 0) {
+    const t = f.peorTramo;
+    card.append(el('div', null, 'El tramo donde más se te cae el promedio: entre ' + t.desde +
+      '′ y ' + t.hasta + '′, ' + t.delta + ' de oro, sobre ' + t.n + ' partida' +
+      (t.n === 1 ? '' : 's') + '.'));
+  }
+  if (f.mejorTramo && f.mejorTramo.delta > 0) {
+    const t = f.mejorTramo;
+    card.append(el('div', 'dim', 'Donde más ganás: entre ' + t.desde + '′ y ' + t.hasta + '′, +' +
+      t.delta + ' de oro (n=' + t.n + ').'));
+  }
+  // Said plainly, because a drawing invites more confidence than the sample deserves.
+  card.append(el('div', 'alcance',
+    'Es una DESCRIPCIÓN de un dibujo, no un hallazgo: no está registrada en el ledger y nadie ' +
+    'la barrió. El n de cada punto está abajo del minuto justamente para que la puedas dudar.'));
+  box.append(card);
+  engancharTooltip(caja);
 }
 
 /* ------------------------------------------------------------------ cuentas y key */
@@ -1861,9 +2056,9 @@ function armarSecciones() {
     ['partidas', 'Partidas', renderPartidas, false, () => ({ badge: '', texto: 'buscar y filtrar' })],
     ['momentos', 'Lo que salió caro', renderMomentos, false, () => ({ badge: '', texto: 'últimas 5' })],
     ['graficos', 'Curva y mapa de muertes', renderGraficos, false, () => null],
-    ['runas', 'Runas y clases', renderRunas, false, () => ({ badge: 'nuevo', tono: 'bien',
-      texto: 'keystones y contra qué clase' })],
-    ['prep', 'Antes de entrar', renderPrep, false, () => ({ badge: '', texto: 'matchup' })],
+    ['camino', 'Camino a Diamante', renderCamino, false, () => ({ badge: '', texto: 'cuántas partidas faltan' })],
+    ['runas', 'Runas y clases', renderRunas, false, () => ({ badge: '', texto: 'keystones y contra qué clase' })],
+    ['prep', 'Antes de entrar', renderPrep, false, () => ({ badge: '', texto: 'el matchup y su forma' })],
     ['cobertura', 'De qué no puedo hablar', renderCobertura, false, () => null],
     ['ledger', 'Hipótesis registradas', renderLedger, false, () => null],
     ['cuentas', 'Cuentas y key', renderCuentas, false, (e) => {

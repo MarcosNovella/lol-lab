@@ -76,8 +76,9 @@ calcula nada hasta que la abrís. Se acuerdan de cómo las dejaste.
 | **Partidas** | la lista completa, filtrable por campeón, resultado, tag y rival. Cada fila se despliega con TODO lo derivable de esa partida: curva de oro, fases, peleas, muertes, épicos, tempo, roams, build con íconos y los momentos más caros. |
 | **Lo que salió caro** | las últimas cinco, con la build y los tres momentos de cada una. |
 | **Curva y mapa** | la curva de oro de la última partida medible y el mapa de muertes sobre el minimapa real. |
+| **Camino a Diamante** | dónde estás, cuánto LP falta, y cuántas partidas — en **tres** números, no en uno. El LP por victoria y por derrota sale de TUS snapshots de rango, así que tu punto de equilibrio es tuyo y no un 50% de manual. |
 | **Runas y clases** | qué keystone llevás vos y cuál te tocó enfrente, con winrate y n; y tu récord contra cada clase de campeón. Sale de partidas que ya tenías: no gasta un solo request de Riot. |
-| **Antes de entrar** | el matchup: tu récord acá, tus reps en todas las cuentas, el meta de op.gg. |
+| **Antes de entrar** | el matchup: tu récord acá, tus reps en todas las cuentas, el meta de op.gg — y **la forma**: el oro contra tu rival minuto a minuto sobre todas tus reps, cada partida en gris y el promedio encima. |
 | **De qué no puedo hablar** | la cobertura, con buscador. |
 | **Hipótesis** | el ledger. |
 | **Cuentas y key** | rango por cola, pendientes, dejadas atrás, sin timeline, último sync, y el estado de la key. |
@@ -158,6 +159,31 @@ Nada de esto es obligatorio para arrancar: **el panel y la terminal registran un
 (`lol cuenta LegendofTorcuato#LAS smurf`, o el formulario que aparece en el panel cuando la caché
 está vacía). Antes el primer paso sólo existía como tool de MCP, así que un clon nuevo abría el
 panel y no tenía por dónde empezar.
+
+## Qué hace esto que op.gg no
+
+No es una lista de features: son dos cosas que esas herramientas **estructuralmente** no pueden
+hacer, porque no tienen tus timelines ni tu historial de rango.
+
+**La forma del matchup.** op.gg sabe el winrate de Diana contra Zed sobre diez mil partidas. No
+sabe nada de tus quince, y no tiene timelines: "estás +100 a los 14 y la diferencia recién se abre
+después del 20 en este matchup" no es una frase que pueda producir. El winrate te dice que el
+matchup es difícil; la forma te dice **dónde** se rompe, que es la mitad sobre la que podés hacer
+algo antes de la próxima partida.
+
+Con tres reglas para que no sea la mentira habitual de un promedio: la **n es por minuto** (las
+partidas se terminan, así que la cola de la curva es otra muestra y la línea se afina donde hay
+menos); **cada partida se dibuja** detrás del promedio, así que la dispersión se ve en vez de
+describirse; y el peor tramo se atribuye a la **menor** de sus dos n.
+
+**El camino, con tres números en vez de uno.** Todo sitio con calculadora de ascenso te contesta
+con un número confiado. Un winrate medido sobre cincuenta partidas tiene un intervalo de unos
+catorce puntos, y esa es la diferencia entre "sesenta partidas" y "con este winrate no subís".
+Acá están los tres, y el pesimista tiene permitido decir que no.
+
+Además el **LP por victoria y por derrota está medido de tus propios snapshots**, no asumido en
+veinte: depende de la distancia entre tu MMR y tu división, se mueve mientras subís, y es toda la
+diferencia entre "45% es equilibrio" y "necesitás 52% sólo para mantenerte".
 
 ## Cómo se arma el benchmark
 

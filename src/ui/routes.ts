@@ -13,8 +13,9 @@ import {
   untaggedGames,
 } from '../analysis/capture.ts';
 import { clasesDe, type FilaClase, porClaseRival, sinClasificar } from '../analysis/classes.ts';
+import { type Camino, caminoA, TIERS, type Tier } from '../analysis/climb.ts';
 import { coverageOf, coverageTotals } from '../analysis/coverage.ts';
-import { biggestSwing, phaseSplit, stateCurve } from '../analysis/curve.ts';
+import { biggestSwing, phaseSplit, type StateCurve, stateCurve } from '../analysis/curve.ts';
 import { evaluationsOf, listHypotheses, verdictLabel } from '../analysis/hypotheses.ts';
 import { itemRace } from '../analysis/items.ts';
 import { objectivesOf, roamsOf, tempoOf, visionOf } from '../analysis/macro.ts';
@@ -35,8 +36,14 @@ import {
   priorsKeyedLike,
   readPriors,
 } from '../analysis/priors.ts';
-import { describeRank, latestSnapshot, TRACKED_QUEUES } from '../analysis/rank.ts';
-import { type DeathDot, deathMapSvg, goldCurveSvg, isOwnHalf } from '../analysis/render.ts';
+import { describeRank, latestSnapshot, snapshotHistory, TRACKED_QUEUES } from '../analysis/rank.ts';
+import {
+  type DeathDot,
+  deathMapSvg,
+  goldCurveSvg,
+  isOwnHalf,
+  signatureSvg,
+} from '../analysis/render.ts';
 import {
   byKeystone,
   type Keystone,
@@ -46,6 +53,7 @@ import {
   runeDuelOf,
   unreadableKeystones,
 } from '../analysis/runes.ts';
+import { type Firma, firmaDe, LECTURA_ES, lecturaDe } from '../analysis/signature.ts';
 import { mean, round } from '../analysis/stats.ts';
 import { keyState } from '../riot/key.ts';
 import type { Db } from '../store/db.ts';
@@ -1231,6 +1239,103 @@ export function partida(db: Db, cuenta: string, matchId: string): PartidaDetalle
       sinCatalogo: catalogo === null ? (row.patch ?? '?') : null,
     },
   };
+}
+
+// ----------------------------------------------------------- firma y camino
+
+/**
+ * The shape of a matchup across every rep of it.
+ *
+ * The thing an aggregator cannot do. op.gg knows the win rate of Diana into Zed over ten
+ * thousand games and has no timelines at all, so "you are +200 at ten and −400 by twenty in this
+ * matchup" is not a sentence it can produce. The win rate says the matchup is hard; this says
+ * WHERE it breaks, which is the part he can act on between one game and the next.
+ */
+export type FirmaRespuesta = {
+  campeon: string | null;
+  rival: string | null;
+  juegos: number;
+  ganadas: number;
+  /** Games in scope with no timeline, so a thin curve is visibly thin and not silently thin. */
+  sinTimeline: number;
+  puntos: Firma['puntos'];
+  peorTramo: Firma['peorTramo'];
+  mejorTramo: Firma['mejorTramo'];
+  lectura: string;
+  svg: string;
+};
+
+export function firma(
+  db: Db,
+  alcance: Alcance,
+  filtro: { campeon?: string | null; rival?: string | null } = {},
+): FirmaRespuesta {
+  const { puuid } = cuentaDe(db, alcance.cuenta);
+  const rows = queryParticipants(db, {
+    ...consultaDe(puuid, alcance),
+    ...(filtro.campeon ? { champion: filtro.campeon } : {}),
+  });
+
+  const curvas: { curve: StateCurve; win: boolean; at: number }[] = [];
+  let sinTimeline = 0;
+  for (const row of rows) {
+    const match = getRawMatch(db, row.matchId);
+    const timeline = getRawTimeline(db, row.matchId);
+    if (match === null || timeline === null) {
+      sinTimeline += 1;
+      continue;
+    }
+    const curve = stateCurve(match, timeline, puuid);
+    if (curve.points.length === 0) continue;
+    // Through `sameChampion`, always: 'zed' from a text box and `Zed` from the cache are the
+    // same opponent, and a raw comparison is the G-016 defect in its cheapest form.
+    if (
+      filtro.rival &&
+      (curve.opponentChampion === null || !sameChampion(curve.opponentChampion, filtro.rival))
+    ) {
+      continue;
+    }
+    curvas.push({ curve, win: row.win === 1, at: row.gameCreation });
+  }
+
+  const f = firmaDe(curvas);
+  return {
+    campeon: filtro.campeon ?? null,
+    rival: filtro.rival ?? null,
+    juegos: f.juegos,
+    ganadas: f.ganadas,
+    sinTimeline,
+    puntos: f.puntos,
+    peorTramo: f.peorTramo,
+    mejorTramo: f.mejorTramo,
+    lectura: LECTURA_ES[lecturaDe(f)],
+    svg: signatureSvg(
+      f.curvas.map((c) => ({ puntos: c.puntos, win: c.win })),
+      f.puntos.map((p) => ({ minute: p.minute, goldDiff: p.goldDiff, n: p.n })),
+    ),
+  };
+}
+
+/**
+ * How far the target rank is, in games, from his own numbers — with the interval that makes the
+ * answer honest.
+ *
+ * Every site with a climb calculator answers this with one confident number. This one gives
+ * three, because at fifty games the win-rate interval is about fourteen points wide and that is
+ * the difference between "sixty games away" and "this win rate does not climb at all".
+ */
+export function camino(db: Db, alcance: Alcance, objetivo: string): Camino {
+  const { puuid } = cuentaDe(db, alcance.cuenta);
+  // Ranked solo only: the target is a solo-queue rank and flex LP is a different ladder.
+  const snapshots = snapshotHistory(db, puuid, 'RANKED_SOLO_5x5');
+  const rows = queryParticipants(db, consultaDe(puuid, { ...alcance, cola: 420 }));
+  const tier = (TIERS as readonly string[]).includes(objetivo.toUpperCase())
+    ? (objetivo.toUpperCase() as Tier)
+    : 'DIAMOND';
+  return caminoA(snapshots, tier, {
+    ganadas: rows.filter((r) => r.win === 1).length,
+    jugadas: rows.length,
+  });
 }
 
 // ------------------------------------------------------------- runas y clases

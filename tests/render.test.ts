@@ -9,6 +9,7 @@ import {
   mapPoint,
   renderPage,
   SVG_STYLE,
+  signatureSvg,
 } from '../src/analysis/render.ts';
 import { CLIENT_STYLE } from '../src/ui/page.ts';
 
@@ -160,9 +161,41 @@ describe('the SVGs carry no presentation of their own', () => {
     // Both variants of the map: with the minimap photo underneath it emits `mapveil`, which is
     // a class like any other and needs a rule on both surfaces or the veil renders as an
     // opaque black plate over the picture.
+    // The signature too: it emits its own classes (`rep`, `media`, `mediaPunto`) and the same
+    // trap applies — a builder that carries no presentation renders as browser defaults, which
+    // for a polyline means an opaque black fill over the whole plot.
+    const firma = signatureSvg(
+      [
+        {
+          win: true,
+          puntos: [
+            { minute: 5, goldDiff: 200 },
+            { minute: 10, goldDiff: 600 },
+          ],
+        },
+        {
+          win: false,
+          puntos: [
+            { minute: 5, goldDiff: -100 },
+            { minute: 10, goldDiff: -800 },
+          ],
+        },
+      ],
+      [
+        { minute: 5, goldDiff: 50, n: 2 },
+        { minute: 10, goldDiff: -100, n: 2 },
+      ],
+    );
     const svg =
-      deathMapSvg(dots) + deathMapSvg(dots, 520, '/img/map/map11.png') + goldCurveSvg(points);
-    return [...new Set([...svg.matchAll(/class="([^"]+)"/g)].map((m) => m[1] ?? ''))];
+      deathMapSvg(dots) +
+      deathMapSvg(dots, 520, '/img/map/map11.png') +
+      goldCurveSvg(points) +
+      firma;
+    // Classes travel space-separated (`rep gano`), so the set has to be split or a compound
+    // value goes looking for a rule named ".rep gano" and finds one by accident.
+    return [
+      ...new Set([...svg.matchAll(/class="([^"]+)"/g)].flatMap((m) => (m[1] ?? '').split(/\s+/))),
+    ].filter((c) => c !== '');
   }
 
   it('every emitted class has a rule in the shared stylesheet', () => {
