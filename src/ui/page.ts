@@ -6,7 +6,7 @@
  * The document is a SHELL: it ships no data, and everything it shows comes from /api/*, so
  * there is exactly one place where each number is produced.
  *
- * The layout is PROGRESSIVE DISCLOSURE and that is a decision, not a style (ADR-024). One card
+ * The layout is PROGRESSIVE DISCLOSURE and that is a decision, not a style (ADR-033). One card
  * says what to do now; everything else is a collapsed section that renders the first time it is
  * opened. The panel used to paint nine sections at once — the whole engine at full volume, which
  * is the shape of a report and not of a thing you use after playing at two in the morning.
@@ -331,7 +331,7 @@ ${SVG_STYLE}
  * Biome and to Vitest: the page would load, do nothing, and every check would stay green
  * (G-022). It also carries NO raw backtick — one inside a comment ended this literal three
  * hundred lines early and what spilled out happened to be invalid TypeScript, which is luck and
- * not a check, so the byte is banned and a test asserts it (G-034).
+ * not a check, so the byte is banned and a test asserts it (G-040).
  */
 export const CLIENT_SCRIPT = `
 const TOKEN = new URLSearchParams(location.search).get('t');

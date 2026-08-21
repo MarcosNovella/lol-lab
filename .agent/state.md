@@ -266,37 +266,37 @@ código.** Cuatro de los siete son eso exactamente, y este repo se define por lo
   `challenges` que el propio G-009 documenta como banderas 0/1 e idénticas entre sí; los dos
   seguían `causal`, y `rankable = contamination === 'causal'`, así que el benchmark les calculaba
   Cohen's d y percentil y podían encabezar el reporte. El mismo flag pesaba dos veces. Cerrado con
-  `Metric.distribution` (ADR-022) + `looksBinary`, que RE-CHEQUEA la declaración contra la muestra:
-  en la primera corrida degradó una tercera métrica que nadie había marcado. G-029, G-030.
+  `Metric.distribution` (ADR-031) + `looksBinary`, que RE-CHEQUEA la declaración contra la muestra:
+  en la primera corrida degradó una tercera métrica que nadie había marcado. G-035, G-036.
 - **B · `lol growth` afirmaba progreso sobre dos curvas planas.** Con las dos derivas en cero
   todas las comparaciones dan falso y el control caía al `else`, que lee `net >= 0`: "tu línea se
   movió MÁS que la de los rivales (neto +0.000)". G-012 en un segundo lugar. `growthVerdict` es
-  ahora puro, testeado, y rechaza el caso degenerado en su primera rama. G-032.
+  ahora puro, testeado, y rechaza el caso degenerado en su primera rama. G-038.
 - **C · `verdictFor` traducía "no medible" a `no_effect`,** con un test que lo fijaba.
   `conversionGapBinary` devuelve NaN con n GRANDE cuando un bucket queda vacío, así que una
   muestra de un solo lado se publicaba como "no hay efecto". `unmeasurable` es ahora su propio
-  veredicto, con `verdictLabel` para que las tres front-ends no lo traduzcan distinto. G-033.
+  veredicto, con `verdictLabel` para que las tres front-ends no lo traduzcan distinto. G-039.
 - **D · Los priors de op.gg desaparecían en silencio.** Probado con archivos: CRLF → 0 priors,
   columna renombrada → 0 priors, archivo ausente → 0 priors, los tres indistinguibles y el
   tercero documentado como normal. El costo no era el meta faltante: `confidenceOf` pasaba a
   decir `mayormente_propio`, una etiqueta de confianza EQUIVOCADA. Y el CSV lo escribe un script
-  Python en Windows, que es la máquina de G-010. `readPriors` + `PriorsProblem`. G-031.
+  Python en Windows, que es la máquina de G-010. `readPriors` + `PriorsProblem`. G-037.
   Verificado en vivo: con el CSV CRLF el prep pasó de "tu registro manda (100%)" a "(60%)".
 - **E · `collectStates.skipped` se calculaba y no lo leía nadie,** bajo un comentario que promete
   que nunca se descartan en silencio. `Measurement.unreadable` lo lleva hasta la evaluación, y
   `hip`/`cerrar` lo dicen. No se persiste: describe la caché de hoy, no la evaluación.
 - **F · El backfill de timelines era MCP-only.** Ahora `lol backfill`, segunda fase del botón de
   sincronizar del panel, y un contador `sin timeline` en cada tarjeta de cuenta más una acción en
-  "qué hacer ahora". G-035.
+  "qué hacer ahora". G-041.
 - **G · El panel no podía arrancar solo.** Resolver una cuenta existía únicamente como tool de
   MCP, así que un clon nuevo abría el panel y recibía cinco 404 `no conozco la cuenta 'smurf'` sin
   nada que hacer. `lol cuenta`, `POST /api/cuenta`, y el panel esconde las secciones de lectura y
-  muestra un formulario mientras no haya cuentas. ADR-023.
+  muestra un formulario mientras no haya cuentas. ADR-032.
 
 **Un bug nuevo, cometido y atrapado durante la sesión:** un backtick dentro de un comentario
 JSDoc adentro de `CLIENT_SCRIPT` terminó el template literal 300 líneas antes. El test de G-022 lo
 agarró sólo porque lo que se derramó resultó ser TypeScript inválido — podría haber parseado y no
-significar nada. G-034 prohíbe el byte y lo chequea por test.
+significar nada. G-040 prohíbe el byte y lo chequea por test.
 
 verify verde, **319 tests** (289 → 319). Nada de esto se tocó en su máquina: la caché sintética
 vive en `data/`, que es gitignoreado, y se borró al terminar.
@@ -326,7 +326,7 @@ sobre `node:http`, sin build step (ADR-003). Meter Chart.js o similar es o un `<
 vendorear un blob minificado al repo más una ruta que lo sirva. El hover que faltaba en la curva
 salió en 40 líneas de vanilla sobre el SVG que ya existe. El permiso rindió en los DATOS.
 
-### El panel (ADR-024, ADR-025)
+### El panel (ADR-033, ADR-034)
 - Una tarjeta dice qué hacer ahora; el resto son once secciones plegadas que se calculan recién
   al abrirlas. Cada título lleva su número (*Taguear 45*, *key falta*): cerrada no es a ciegas.
   Se acuerdan de cómo las dejó. El arranque pasó de nueve renders y cinco fetches a dos.
@@ -339,7 +339,7 @@ salió en 40 líneas de vanilla sobre el SVG que ya existe. El permiso rindió e
   una al desplegarla — es `riot_match_detail` hecho visible.
 - Avisos apilados, atajos (1/2/3, s, p, e/E, ?), buscador en cobertura, tooltip en la curva.
 
-### Runas y clases (ADR-026) — lo que el permiso de "APIs externas" compró de verdad
+### Runas y clases (ADR-035) — lo que el permiso de "APIs externas" compró de verdad
 **Los perks estaban en la caché desde el primer sync y nada los leía.** ADR-004 guarda el JSON
 completo justamente para esto: sólo faltaba una tabla que dijera qué significa cada id. Bajarla
 no cuesta un solo request de Riot — Data Dragon es otro host, sin key y sin limiter.
@@ -357,18 +357,18 @@ no cuesta un solo request de Riot — Data Dragon es otro host, sin key y sin li
 ### Bugs, casi todos míos y todos encontrados abriendo la página
 - `esc()` era código muerto y lo usé sobre el script: adentro de `<script>` las entidades no se
   decodifican, así que cada arrow function quedó como entidad. Panel en blanco, consola vacía.
-  G-036.
-- Backtick en un comentario CSS terminó `CLIENT_STYLE` 300 líneas antes. G-037. **Volví a
+  G-042.
+- Backtick en un comentario CSS terminó `CLIENT_STYLE` 300 líneas antes. G-043. **Volví a
   cometerlo dos veces más en esta sesión**; el test lo agarró las tres, que es exactamente para
   lo que está.
 - `.ahora` era la tarjeta hero Y el modificador de urgencia: un punto de 6px salió como blob de
-  40px. G-038.
+  40px. G-044.
 - La cuenta por defecto salía de un `GROUP BY` sobre `participants` — que tiene a los diez
-  jugadores — así que devolvía un desconocido y caía al orden alfabético. G-039.
+  jugadores — así que devolvía un desconocido y caía al orden alfabético. G-045.
 - **LeBlanc sin clase**: el catálogo se keyeaba por el `id` de Data Dragon (`Leblanc`) y se leía
-  con el `championName` de Riot (`LeBlanc`). G-016 por tercera vez. G-040.
+  con el `championName` de Riot (`LeBlanc`). G-016 por tercera vez. G-046.
 - `KeystoneRow` no llevaba `runeId`, así que todos los íconos pedían `undefined.png` y el
-  `onerror` los borraba en silencio: la tabla simplemente no tenía fotos. G-041.
+  `onerror` los borraba en silencio: la tabla simplemente no tenía fotos. G-047.
 
 verify verde, **351 tests** (332 → 351). Visto en Chromium, con arte real, cero errores de
 consola.
@@ -385,7 +385,7 @@ llegar a Diamante o Maestro. La respuesta no fue una lista de features: fueron l
 esas herramientas **estructuralmente** no pueden hacer, porque no tienen sus timelines ni su
 historial de rango.
 
-### La forma del matchup (ADR-027)
+### La forma del matchup (ADR-036)
 `src/analysis/signature.ts` + `signatureSvg`. El oro contra su rival de línea en cada minuto
 muestreado, promediado sobre TODAS sus reps, dibujado como cada partida en gris con el promedio
 encima — la forma de ÉNFASIS, y es el argumento, no la decoración.
@@ -403,7 +403,7 @@ Tres decisiones para que no sea la mentira habitual de un promedio:
   un hecho sobre el punto flaco.
 Nada de esto está en el ledger y el panel lo dice: es la descripción de un dibujo.
 
-### El camino, con tres números (ADR-028)
+### El camino, con tres números (ADR-037)
 `src/analysis/climb.ts`. Winrate medido + los dos extremos de su intervalo de Wilson.
 
 Sobre la caché sintética: Platino I 38 LP, faltan 462 LP. **+24.2 / −17.3 LP medidos de sus
@@ -419,10 +419,10 @@ partidas · optimista 44 · **pesimista: `null`, "con 39% no subís"**. Ese null
   barra que arranca en −4% haría que la mitad honesta de la tarjeta parezca un bug.
 
 ### Bugs
-- **G-043**: `partidasPara(300, 0.6, +22/−18)` son exactamente 50 partidas y devolvía 51.
+- **G-049**: `partidasPara(300, 0.6, +22/−18)` son exactamente 50 partidas y devolvía 51.
   `0.6*22 − 0.4*18` es 5.999999999999999 en flotante, así que el cociente es 50.00000000000001 y
   el ceil suma una. Una partida de más, en el número principal de la tarjeta.
-- **G-042**: el agregado sobre una serie que se ENCOGE tiene que llevar su n por punto y el
+- **G-048**: el agregado sobre una serie que se ENCOGE tiene que llevar su n por punto y el
   dibujo tiene que mostrarlo. Hermano de G-017, que era el mismo error sobre los frames de una
   partida en vez de sobre un corpus.
 - El test de G-023 (toda clase emitida tiene regla) no partía las clases compuestas, así que
@@ -436,10 +436,10 @@ incógnita y una ecuación. Correcto, y sobre su caché real aplica a CERO tramo
 muestrea en un sync, un sync pasa después de una sesión, y una sesión son varias partidas.
 
 - Ahora ajusta **todos los tramos a la vez** por mínimos cuadrados: seis victorias y una derrota
-  siguen siendo una ecuación con dos incógnitas, pero tres tramos así ya no lo son. G-044.
+  siguen siendo una ecuación con dos incógnitas, pero tres tramos así ya no lo son. G-050.
 - Cuando aun así no hay ajuste (menos de dos tramos, tramos colineales, o un resultado fuera de
   lo que el LP puede valer) usa un supuesto de ±20 **etiquetado**: `LpMedido.origen` viaja con la
-  respuesta y el panel lo pinta en amarillo. G-045.
+  respuesta y el panel lo pinta en amarillo. G-051.
 - Probado con sus tres snapshots reales: cae al supuesto y dice por qué ("el ajuste dio 79 LP por
   victoria, fuera de rango"). 347 partidas a Diamante al ritmo supuesto, 68 si va bien, nunca si
   va mal. Con el LP medido de verdad el central baja a ~96: por eso la etiqueta importa.
