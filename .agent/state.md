@@ -666,6 +666,67 @@ Key renewed and the whole pipeline exercised against the LIVE API before anythin
 - `lol growth` also filtered to soloq in SILENCE while every other command declares its scope; it
   now prints `alcance: solo soloq . rol MIDDLE . una cuenta, nunca mezcladas`.
 
+## S14 2026-08-20, HIS MACHINE — the four sessions come home, and one name
+
+He came back to a machine holding a clone that was FOURTEEN COMMITS BEHIND and one commit
+ahead: four cloud sessions (S10, S11, S12 and the merge) had never been pulled, and S13's fix
+had never been pushed. Nothing was lost; the reconciliation is below because two of its
+collisions were the kind that a fast merge would have buried.
+
+- **S13's commit was rebased, not replayed.** Two collisions. Its guardrail was numbered G-029,
+  which the cloud had already spent on the briefing's null `n`, so it is **G-052** now — in the
+  rule, the module and the test. And S10's audit had ALREADY rewritten the same function for
+  **G-038** (the pair of flat curves that fell through to a claim of progress); taking S13 as
+  written would have deleted that refusal from the one surface it protects. `slopeLines` now
+  DELEGATES to `growthVerdict` and feeds it the FIT, so there is one verdict with both guards.
+  Two guardrails on one function, and the second nearly ate the first.
+- **The sessions were numbered S9, S9, S10, S11.** Two sections both called S9 in the file that
+  is read at the start of every session. Renumbered S9..S14.
+- **`verify` is back to zero warnings.** `GrowthDot` and `PhaseBar` were imported into
+  `routes.ts` and never used — the one standing warning in every run, which is G-031 in
+  miniature: a checker whose steady state is "one known warning" trains you to skip the line
+  where a real one appears.
+- **One name.** Folder, `package.json`, the MCP server's self-reported name, the README title,
+  the desktop shortcut, the GitHub repo (`lol-project` -> `lol-lab`, redirect kept) and the two
+  paths in `~/.claude.json`. Roadmap item 5, deferred since 2026-08-16, is closed.
+- **G-053 was born from the rename**: 365 pnpm symlinks pointed into the old directory, so
+  `biome` could not find its own binary, and `pnpm install` — with and without `--force` —
+  answered "Already up to date". Only deleting `node_modules` fixed it.
+- `git config user.name` is set for this repo now, so his commits stop being authored by
+  `unknown`.
+
+### Run on the REAL cache, which is the point of being on his machine
+
+The first four items were flagged in S11 and S12 as never having touched his 86 games.
+
+- `pnpm verify` green from the new path: **418 tests**, zero warnings, Node 24.14.1.
+- Cache intact through the move: 86 matches, 82 timelines, 2 accounts, 7 hypothesis rows, 3 rank
+  snapshots, and the S12 tables populated (1434 champion rows, 491 rune rows, 1843 item rows
+  over 8 patches). `catalogos` and `assets` both reported everything already present (420 files,
+  7.8 MB), which is what an idempotent task is supposed to say the second time.
+- **Key valid, and the pipeline reaches Riot.** `lol rank` and `lol cerrar` on both accounts:
+  0 new games on either, because he has not played since 2026-08-17. Rank unchanged, Platinum I
+  38 LP and Silver I 29 LP flex, and the clock correctly recorded nothing.
+- **G-052's fix, measured rather than tested.** `lol growth smurf cs_first_10 mid`, 43 games:
+  endpoint drift −0.224 against +0.138, fitted −0.047 against +0.014. The old surface would have
+  printed a net of −0.362; the fit says **−0.062**, six times smaller, same sign, so the OJO
+  block correctly stays quiet. The sentence now comes off the fit.
+- **The panel, on real data, in a browser.** Both accounts selectable, role and queue filters
+  live (S11's fix), "AL DÍA · nada que hacer", `Cómo viene` at 46% over 71 games with the two
+  measurable benchmark cards (CS@10 63.0 against 58.8, placas 10.52 against 9.42) and the
+  contaminated ones deliberately absent. Runes and classes read from real perks.
+- **The climb card refuses to guess, out loud.** Platinum I, 462 LP to Diamond, 50% over 54 games
+  with a 37–63% interval, and a yellow **"SUPUESTO, no medido"** because his rank clock has ONE
+  usable span and the fit needs two — exactly G-051's labelled fallback, on his data, the first
+  time anyone saw it there. Its three numbers say: at 37% no, at 50% no, at 63% ninety games.
+  A tool that says "at your current win rate you do not climb" is the tool working.
+
+### NOT run, deliberately
+- **`lol antes` still has never run on the real cache.** It is the one item left from the S9
+  list, and it is left on purpose: the briefing SPENDS an exposure that cannot be undone, and
+  there is no preview flag by design. The first real run should be his, when he sits down to
+  play, not a smoke test.
+
 ## Open questions
 - **Diana**: closed by D3 as "the ledger decides", with the caveat that at n=5 needing 25, and 8
   games since he last played her, it may never reach n.
@@ -677,7 +738,8 @@ Key renewed and the whole pipeline exercised against the LIVE API before anythin
 - **The smurf's five ledger rows freeze the day he moves to the main** (roadmap §A1). Ask him on
   Monday: retire them with a reason, or leave them live and un-accruing? Leaving them live is
   honest — nothing about them changed — but the panel then shows five rows that can never move.
-- `git config user.name` is unset ON HIS MACHINE (the email is set), so his commits are authored by `unknown`. Re-checked 2026-08-20: still unset.
+- ~~`git config user.name` unset~~ — CLOSED 2026-08-20, set for this repo. Set it globally
+  too if other repos matter.
 - **Nothing from S9/S9b has run on the real cache.** The upkeep chain was exercised against live
   Data Dragon here (a real catalogue and 244 real images), but never against HIS 86 matches.
 - **The briefing has never run on the real cache.** Everything in S9 was measured against fixtures
