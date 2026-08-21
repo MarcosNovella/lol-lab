@@ -40,9 +40,10 @@ reported tags) · `coverage` · `rank` · `render` (SVG + its CSS) · `names` ·
 (every metric declares `contamination`) · `items` (build timings against the lane opponent) ·
 `briefing` (what may be said BEFORE a game, ADR-022).
 
-Cache: SQLite at `data/riot.db`, gitignored and single-machine. As of the sync of 2026-08-19
-00:05 UTC: 86 matches, 82 timelines (the 4 missing are remakes), 2 accounts, 7 hypothesis rows
-(5 live, 2 retired), 3 rank snapshots. Last game: 2026-08-17 19:49 ART. 75 smurf ranked games
+Cache: SQLite at `data/riot.db`, gitignored and single-machine. Re-synced 2026-08-20 and
+UNCHANGED: 86 matches, 82 timelines (the 4 missing are remakes, all 1-4 minutes long, verified
+by query), 2 accounts, 7 hypothesis rows (5 live, 2 retired). Last game still 2026-08-17 19:49
+ART -- he has not played in three days, so no ledger row moved. 75 smurf ranked games
 (57 soloq + 18 flex) and 11 on the main. `riot_sync` defaults to `withTimeline: false`, so a
 sync must be followed by `riot_backfill_timelines` or the new games have no minute data.
 
@@ -435,7 +436,7 @@ verify verde, 343 tests.
 - El reparto por tag ya está, pero **sobre su caché real va a mostrar cero** hasta que tague:
   el backlog se cerró por decisión (ADR-019) y el tagueo arranca con su próxima partida.
 
-## S9 2026-08-20, CLOUD — la auditoría, y las siete cosas que encontró
+## S10 2026-08-20, CLOUD — la auditoría, y las siete cosas que encontró
 
 Sesión de revisión pedida en esos términos: "chequeá que todo lo que tenemos está bien y
 funcional y realmente sirve, y cuestionate todo". Todo corrido de verdad, incluida una caché
@@ -505,7 +506,7 @@ vive en `data/`, que es gitignoreado, y se borró al terminar.
   `catalogForPatch` ordena versiones como texto, así que `.9` gana sobre `.10` dentro de un mismo
   parche.
 
-## S10 2026-08-20, CLOUD — el panel se pliega, y dos dimensiones que ya estaban
+## S11 2026-08-20, CLOUD — el panel se pliega, y dos dimensiones que ya estaban
 
 Dos pedidos: (1) que se vea mejor y no haya tanto en pantalla de una, con desplegables; (2) que
 si hace falta bajar librerías o buscar APIs y datos externos, se haga.
@@ -564,11 +565,11 @@ verify verde, **351 tests** (332 → 351). Visto en Chromium, con arte real, cer
 consola.
 
 ### Para la próxima sesión, con datos reales
-Correr una vez: `pnpm lol catalogos` y `pnpm lol assets`. Todo lo de S10 se verificó sobre 45
+Correr una vez: `pnpm lol catalogos` y `pnpm lol assets`. Todo lo de S11 se verificó sobre 45
 partidas sintéticas con varianza cero — la forma está probada, los números todavía no dijeron
 nada. La vista que nunca existió y que miraría primero es *Cómo viene* sin filtrar por rol.
 
-## S11 2026-08-20, CLOUD — las dos cosas que op.gg no puede hacer
+## S12 2026-08-20, CLOUD — las dos cosas que op.gg no puede hacer
 
 Pedido: que sea de verdad superior a op.gg o Mobalytics, personalizado para mejorar en mid y
 llegar a Diamante o Maestro. La respuesta no fue una lista de features: fueron las dos cosas que
@@ -619,7 +620,7 @@ partidas · optimista 44 · **pesimista: `null`, "con 39% no subís"**. Ese null
   `class="rep gano"` buscaba una regla llamada `.rep gano` y la encontraba por accidente.
   Corregido junto con el builder nuevo.
 
-### S11b — la medición que no medía nada en su caché
+### S12b — la medición que no medía nada en su caché
 Preguntó si existía la sección de "cuántas partidas faltan". Existía, y **no le hubiera dado un
 número**: `lpMedido` sólo leía tramos donde se movió UN solo contador, que es el caso con una
 incógnita y una ecuación. Correcto, y sobre su caché real aplica a CERO tramos — el reloj se
@@ -636,6 +637,35 @@ muestrea en un sync, un sync pasa después de una sesión, y una sesión son var
 
 verify verde, **377 tests** (351 → 377). Visto en Chromium, cero errores de consola.
 
+## S13 2026-08-20, HIS MACHINE -- audit, and the guardrail that had not reached the front-end
+
+Key renewed and the whole pipeline exercised against the LIVE API before anything was built.
+
+- **Everything works.** `pnpm verify` green (Node 24.14.1). Key fresh, `riot_sync` reaches Riot on
+  both accounts and all queues and returns 0 new games: he has not played since 2026-08-17, so
+  the rank clock correctly records no change (Platinum I 38 LP, Silver I 29 LP flex).
+- **All three front-ends run on the real cache**: `report`, `prep`, `cobertura`, `growth`,
+  `items`, `hip`, `rank` from the CLI; the panel's every route measured cold and warm
+  (`/api/cobertura` 93 ms is still the slowest, `graficos` 42 KB, everything else <= 8 ms); the
+  MCP tools answered from this session. Auth holds: no token = 403, `../` traversal = 403,
+  `/img/*` public by design. No key in any tracked file (`.env.example` is the empty placeholder).
+- **ONE REAL DEFECT, FOUND AND FIXED. `lol growth` was still printing the reading G-025 killed.**
+  It printed `drift` alone -- the two ends of a rolling mean -- and concluded "tu linea se movio
+  menos que la de los rivales", four days after that number was overturned, under an MMR caveat
+  that has nothing to do with the flaw. The engine had been fixed (`measures.ts` fits every
+  point); the surface he actually reads had not. Measured on the current cache, soloq mid: net
+  drift over windows 5/10/20 is -0.667/-0.362/-0.217 against a fitted -0.133/-0.062/-0.039 --
+  same sign, FIVE TIMES the size, and his own line flips sign at window 20. On mid across all
+  queues the two disagree in SIGN at every window. G-052.
+- **The fix**: `slopeLines()` is pure and exported, so a test reads exactly what the terminal
+  prints. Both numbers ship, labelled ("dos puntos, descripcion" vs "sobre los N puntos"), the
+  DIRECTION is stated from the fit, and a sign disagreement prints an OJO block naming G-025.
+  `signed()` gives every slope its sign and says `sin medir` instead of NaN. Six tests
+  (`tests/growth-cli.test.ts`). Rebased onto the cloud sessions afterwards, so the
+  count on master goes 412 -> 418.
+- `lol growth` also filtered to soloq in SILENCE while every other command declares its scope; it
+  now prints `alcance: solo soloq . rol MIDDLE . una cuenta, nunca mezcladas`.
+
 ## Open questions
 - **Diana**: closed by D3 as "the ledger decides", with the caveat that at n=5 needing 25, and 8
   games since he last played her, it may never reach n.
@@ -647,7 +677,7 @@ verify verde, **377 tests** (351 → 377). Visto en Chromium, cero errores de co
 - **The smurf's five ledger rows freeze the day he moves to the main** (roadmap §A1). Ask him on
   Monday: retire them with a reason, or leave them live and un-accruing? Leaving them live is
   honest — nothing about them changed — but the panel then shows five rows that can never move.
-- `git config user.name` is unset ON HIS MACHINE, so his commits are authored by `unknown`.
+- `git config user.name` is unset ON HIS MACHINE (the email is set), so his commits are authored by `unknown`. Re-checked 2026-08-20: still unset.
 - **Nothing from S9/S9b has run on the real cache.** The upkeep chain was exercised against live
   Data Dragon here (a real catalogue and 244 real images), but never against HIS 86 matches.
 - **The briefing has never run on the real cache.** Everything in S9 was measured against fixtures
