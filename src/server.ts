@@ -113,7 +113,7 @@ function requireAccount(needle: string): { puuid: string; label: string } {
   return { puuid: account.puuid, label: `${account.gameName}#${account.tagLine}` };
 }
 
-const server = new McpServer({ name: 'riot-mcp', version: '0.1.0' });
+const server = new McpServer({ name: 'lol-lab', version: '0.1.0' });
 
 // ---------------------------------------------------------------- key status
 

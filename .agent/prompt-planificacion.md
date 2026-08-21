@@ -47,7 +47,7 @@ te parece que estoy equivocado en eso, decímelo.
 Todo esto anda y está verificado. Leelo antes de proponer nada — no lo rehagas sin razón,
 pero tampoco lo trates como intocable.
 
-**`~/Documents/riot-mcp`** — servidor MCP local sobre la Riot API. TypeScript, Node 24, sin
+**`~/Documents/lol-lab`** — servidor MCP local sobre la Riot API. TypeScript, Node 24, sin
 build step, caché SQLite en `data/riot.db`. Siete tools: `riot_key_status`,
 `riot_resolve_account`, `riot_sync`, `riot_matches`, `riot_benchmark`, `riot_match_detail`,
 `riot_cache_status`. 38 tests, `pnpm verify` verde. Guarda el JSON crudo de cada partida
@@ -105,7 +105,7 @@ justamente los **resultados** contra los cuales correlacionar. Sacá vos la conc
 Esto es un proyecto personal, de hobby, un solo usuario, corriendo local. **Tenés vía libre.**
 
 - Proponé la arquitectura que te parezca mejor, aunque implique tirar o reescribir lo que
-  hay. Si `riot-mcp` tiene que dejar de ser un MCP suelto, decilo.
+  hay. Si `lol-lab` tiene que dejar de ser un MCP suelto, decilo.
 - Agregá lo que se te ocurra que sirva y yo no pedí. Prefiero que propongas de más y yo
   recorte, a que te quedes corto.
 - **No gastes esfuerzo en seguridad de aplicación**: no hay usuarios además de mí, no hay

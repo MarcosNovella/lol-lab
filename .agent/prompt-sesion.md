@@ -12,7 +12,7 @@ contexto duplicado es contexto que se desactualiza y después miente.
 
 ---
 
-Retomamos el proyecto de LoL en `~/Documents/riot-mcp`.
+Retomamos el proyecto de LoL en `~/Documents/lol-lab`.
 
 ## Antes de tocar nada, leé en este orden
 

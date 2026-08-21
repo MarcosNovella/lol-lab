@@ -690,8 +690,12 @@ Key renewed and the whole pipeline exercised against the LIVE API before anythin
   silence them, which is a diff nobody asked for.
 - One historical revision (`688c21c`) holds `matchups.ts` as a BINARY blob. Cosmetic, and
   cleaning it would mean a force-push on a public repo.
-- Repo still named `riot-mcp` locally while GitHub calls it `lol-project`; rename to `lol-lab`
-  deferred (the path is wired into `~/.claude.json`).
+- ~~Repo named `riot-mcp` locally while GitHub called it `lol-project`~~ — CLOSED 2026-08-20.
+  Everything is `lol-lab` now: the folder, `package.json`, the MCP server name, the GitHub repo
+  (redirect kept from the old URL) and `~/.claude.json`.
+- **The GitHub repo is PUBLIC.** It was public through the S8b key incident and still is. Nothing
+  sensitive is tracked today (the key lives only in the gitignored `.env`, verified by scanning
+  every commit), but the exposure is a standing decision nobody has actually taken.
 - **athlete-os is PAUSED** until his WHOOP arrives. M5 and Fase 4 are off the table; build
   nothing that touches it.
 - **The VAULT is a different repo and stays local** — it holds `10-salud` and `20-finanzas` and

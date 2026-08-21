@@ -1,7 +1,8 @@
-# riot-mcp
+# lol-lab
 
-Servidor MCP local sobre la Riot API. Sirve para que Claude pueda leer y analizar tus
-partidas de League of Legends sin el techo de 20 partidas que tiene op.gg.
+El motor que dice qué hacer distinto la próxima partida. Un panel local, una CLI y un
+servidor MCP sobre la misma capa de análisis, corriendo sobre tus propias partidas de
+League of Legends — con los timelines completos que op.gg no te da.
 
 La v1 responde una pregunta: **dónde perdés contra tu propio elo.**
 

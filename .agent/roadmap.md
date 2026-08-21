@@ -361,8 +361,9 @@ page for the gold curve and death map) only if Marcos asks.
    outside the vault would mean designing a merge policy, a touchable-key set and a conflict
    surface — all to automate a paste. Refusing the write makes the rule unbreakable instead of
    enforced.
-5. **The rename** `riot-mcp` -> `lol-lab`, deferred deliberately. End of week, one line in
-   `~/.claude.json`, done when nothing is mid-flight.
+5. **The rename** `riot-mcp` -> `lol-lab`: DONE 2026-08-20. Folder, `package.json`, the MCP
+   server's self-reported name, the GitHub repo (`lol-project` -> `lol-lab`, redirect kept) and
+   the two paths in `~/.claude.json`. Three names for one project is over.
 6. **The personal API key** still has not arrived. The dev key expires every 24h, which is
    fine for interactive work but makes a nightly automated export fragile. Decide whether the
    export tolerates a stale key (queue and retry) or simply skips a day.
