@@ -58,13 +58,11 @@ import { describeRank, latestSnapshot, snapshotHistory, TRACKED_QUEUES } from '.
 import {
   type DeathDot,
   deathMapSvg,
-  type GrowthDot,
   goldCurveSvg,
   growthCurveSvg,
   isOwnHalf,
   type MetricBar,
   metricBarsSvg,
-  type PhaseBar,
   phaseBarsSvg,
   signatureSvg,
 } from '../analysis/render.ts';
