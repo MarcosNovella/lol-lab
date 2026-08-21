@@ -1270,7 +1270,11 @@ function renderSync(box) {
         relleno.style.width = (e.total === 0 ? 0 : (e.hechas / e.total) * 100) + '%';
         // The phase is named because the bar restarts at zero for the second one, and an
         // unlabelled bar going back to zero reads as a bug rather than as a second job.
-        const que = e.fase === 'timelines' ? ' timelines de partidas ya bajadas' : ' partidas';
+        const que = e.fase === 'timelines'
+          ? ' timelines de partidas ya bajadas'
+          : e.fase === 'tareas'
+            ? ' tareas de mantenimiento' + (e.detalle ? ' — ' + e.detalle : '')
+            : ' partidas';
         log.textContent = e.hechas + ' de ' + e.total + que;
       }
       if (e.tipo === 'fin') {

@@ -1,109 +1,48 @@
-import {
-  fetchChampions,
-  fetchItems,
-  fetchRunes,
-  listVersions,
-  versionForPatch,
-} from '../riot/ddragon.ts';
 import { openDb } from '../store/db.ts';
-import {
-  catalogosCacheados,
-  patchesInCache,
-  saveChampions,
-  saveItems,
-  saveRunes,
-} from '../store/items.ts';
+import { catalogVersions, patchesInCache } from '../store/items.ts';
+import { bajarCatalogos } from '../upkeep.ts';
 import { out } from './shared.ts';
 
 /**
- * `lol catalogos` — the static tables for every patch his cache actually contains.
+ * `lol items` — baja la tabla de ítems de cada parche que la caché contenga.
  *
- * THREE of them now, and the second and third cost nothing new: `items` (build timings, ADR-020),
- * `runes` (which keystone he and his opponent ran) and `champions` (the classes, so "how do I do
- * into assassins" becomes answerable). All three come from the same host, all three are
- * immutable per version, and none of them spends a Riot request or touches the rate limiter — so
- * adding two more catalogues to this errand costs one round trip per patch and no budget at all.
+ * Sin key, sin rate limiter, e idempotente: Data Dragon es inmutable por versión, así que una
+ * segunda corrida no vuelve a bajar nada.
  *
- * Runes are the interesting one: the perks have been in every cached match since the first sync
- * and nothing read them, because there was no table saying what a perk id meant. That is ADR-004
- * working exactly as written — the raw payload was kept so a dimension nobody thought to flatten
- * could be derived later without re-downloading anything.
- *
- * Idempotent: a second run re-downloads nothing it already has unless asked with `--todo`. It is
- * a separate command rather than a step of the sync because it is a once-per-patch errand, and
- * folding it into the nightly ritual would spend three round trips every evening to learn that
- * nothing changed.
+ * La lógica vive en `src/upkeep.ts` y no acá: el panel corre exactamente esto detrás del botón de
+ * sincronizar, y dos implementaciones de "qué catálogo falta" es cómo terminan dando respuestas
+ * distintas el día que una aprende algo que la otra no.
  */
 
-export async function run(argv: string[]): Promise<void> {
-  const force = argv.includes('--todo');
+export async function run(): Promise<void> {
   const db = openDb();
+  try {
+    const patches = patchesInCache(db);
+    if (patches.length === 0) {
+      out('No hay partidas en caché todavía, así que no hay parche que buscar.');
+      return;
+    }
+    out(`Parches en caché: ${patches.map((p) => `${p.patch} (${p.games})`).join(' · ')}`);
+    out('');
 
-  const patches = patchesInCache(db);
-  if (patches.length === 0) {
-    out('No hay partidas en caché todavía, así que no hay parche que buscar.');
+    const result = await bajarCatalogos(db, (hechas, total, detalle) =>
+      out(`  ${detalle} (${hechas}/${total})`),
+    );
+
+    for (const patch of result.sinPublicar) {
+      // Nunca caer al catálogo más nuevo: el build path de un ítem cambia entre parches (G-015).
+      out(`  ${patch}: Data Dragon no publica ese parche — esas partidas quedan sin ítems`);
+    }
+    out('');
+    out(
+      result.bajados === 0
+        ? `Nada nuevo que bajar (${result.yaEstaban} ya estaban).`
+        : `Bajé ${result.bajados} catálogo(s). Ahora hay ${catalogVersions(db).length}.`,
+    );
+  } finally {
     db.close();
-    return;
   }
-
-  const cacheados = catalogosCacheados(db);
-  const have = {
-    items: new Set(cacheados.items),
-    runes: new Set(cacheados.runes),
-    champions: new Set(cacheados.champions),
-  };
-  const versions = await listVersions();
-
-  out(`Parches en caché: ${patches.map((p) => `${p.patch} (${p.games})`).join(' · ')}`);
-  out('');
-
-  let downloaded = 0;
-  for (const { patch, games } of patches) {
-    const version = versionForPatch(versions, patch);
-    if (version === null) {
-      // Never fall back to the newest catalogue: an item's build path and a rune's tree both
-      // change between patches, so the wrong table gives a confident wrong answer (G-015).
-      out(
-        `  ${patch}: Data Dragon no publica ese parche — esas ${games} partidas quedan sin tablas`,
-      );
-      continue;
-    }
-
-    const partes: string[] = [];
-    if (have.items.has(version) && !force) {
-      partes.push('ítems ya estaban');
-    } else {
-      const items = await fetchItems(version);
-      partes.push(
-        `${saveItems(db, items)} ítems (${items.filter((i) => i.finished).length} terminados)`,
-      );
-      downloaded += 1;
-    }
-    if (have.runes.has(version) && !force) {
-      partes.push('runas ya estaban');
-    } else {
-      const runes = await fetchRunes(version);
-      partes.push(
-        `${saveRunes(db, runes)} runas (${runes.filter((r) => r.slot === 0).length} keystones)`,
-      );
-      downloaded += 1;
-    }
-    if (have.champions.has(version) && !force) {
-      partes.push('campeones ya estaban');
-    } else {
-      const champions = await fetchChampions(version);
-      partes.push(`${saveChampions(db, champions)} campeones`);
-      downloaded += 1;
-    }
-    out(`  ${patch} → ${version}: ${partes.join(' · ')}`);
-  }
-
-  out('');
-  out(downloaded === 0 ? 'Nada nuevo que bajar.' : `Bajé ${downloaded} tabla(s).`);
-  out('Las runas salen de partidas que ya tenías: no gastó ni un request de Riot.');
-  db.close();
 }
 
-export const SUMMARY =
-  'baja las tablas de Data Dragon (ítems, runas, clases), una por parche jugado';
-export const USAGE = 'lol catalogos [--todo]';
+export const SUMMARY = 'baja la tabla de ítems de Data Dragon, un catálogo por parche jugado';
+export const USAGE = 'lol items';

@@ -171,6 +171,266 @@ ${ticks}
 }
 
 /**
+ * Una fila del gráfico de barras divergentes: una métrica, y de qué lado del rival caés.
+ *
+ * `effect` es el tamaño del efecto ya orientado — positivo SIEMPRE significa que él está mejor,
+ * sin importar si la métrica sube o baja (morir menos es mejor). NaN es "no medible" y se dibuja
+ * como tal en vez de como un cero, que es la sustitución que G-005 existe para frenar.
+ */
+export type MetricBar = {
+  label: string;
+  effect: number;
+  /** Los dos números crudos, ya formateados por quien sabe la unidad: "68,2 vs 64,1". */
+  detail: string;
+  games: number;
+};
+
+/** Más allá de esto el tamaño del efecto es enorme igual, y una barra más larga no dice más. */
+const EFFECT_CLAMP = 1.5;
+
+/**
+ * Barras divergentes ancladas en cero: dónde estás mejor y peor que TU RIVAL DE LÍNEA.
+ *
+ * Es la lectura que el panel no tenía y la que él pidió — entrar, mirar, y saber qué está
+ * fallando. La forma es divergente porque el trabajo del dato es POLARIDAD: no "cuánto farmeo"
+ * sino "de qué lado del rival caigo".
+ *
+ * Tres decisiones de dibujo, y ninguna es de gusto:
+ *
+ * - **La posición ya dice el signo.** Izquierda es peor, derecha es mejor, y el color solo lo
+ *   repite. Por eso puede haber daltonismo en la sala y el gráfico se sigue leyendo.
+ * - **Azul y naranja, no verde y rojo.** El par verde/rojo mide ΔE 7.9 bajo deuteranopía —
+ *   apenas distinguible— contra 26.8 del azul/naranja, que pasa todos los checks. El verde y el
+ *   rojo se quedan donde siempre llevan una palabra al lado ("victoria" / "DERROTA").
+ * - **El largo es el TAMAÑO DEL EFECTO, no la diferencia cruda.** Una diferencia de 8 de CS y una
+ *   de 0.3 de participación en kills no se comparan en la misma escala; en desvíos estándar sí.
+ *   Se recorta en ±1.5 porque más allá de ahí la barra deja de agregar información.
+ */
+export function metricBarsSvg(rows: MetricBar[], width = 720): string {
+  if (rows.length === 0) {
+    return `<svg viewBox="0 0 ${width} 40" width="100%"><text class="tag" x="8" y="22">todavía no hay muestra suficiente</text></svg>`;
+  }
+
+  const gutter = 262;
+  const rowH = 30;
+  const barH = 13;
+  const top = 22;
+  const height = top + rows.length * rowH + 10;
+  // 96 y no 82: con el ancho justo la barra más larga terminaba PEGADA al número, sin espacio
+  // entre la marca y el texto que la explica.
+  const plot = width - gutter - 96;
+  const zero = gutter + plot / 2;
+  const half = plot / 2;
+
+  const x = (effect: number): number => {
+    const clamped = Math.max(-EFFECT_CLAMP, Math.min(EFFECT_CLAMP, effect));
+    return zero + (clamped / EFFECT_CLAMP) * half;
+  };
+
+  const barras = rows
+    .map((row, i) => {
+      const cy = top + i * rowH + rowH / 2;
+      const y = cy - barH / 2;
+      // Recortada si no entra en la canaleta, con el nombre completo en el tooltip. Una
+      // etiqueta que se sale del viewBox se corta sin avisar y se lee como otra métrica: en la
+      // primera versión "Ventaja de oro+XP en fase de líneas" aparecía como "ntaja de oro+XP…".
+      const corta = row.label.length > 34 ? `${row.label.slice(0, 33)}…` : row.label;
+      const etiqueta =
+        `<text class="barlabel" x="${gutter - 10}" y="${cy + 4}" text-anchor="end">` +
+        `${esc(corta)}</text>`;
+      const titulo = `<title>${esc(`${row.label}: ${row.detail} · n=${row.games}`)}</title>`;
+
+      if (!Number.isFinite(row.effect)) {
+        // "No medible" se dibuja como texto y nunca como una barra de largo cero, que se leería
+        // como "no hay diferencia" (G-005).
+        return `<g>${titulo}${etiqueta}<text class="tag" x="${zero + 6}" y="${cy + 4}">sin dispersión para medirlo</text></g>`;
+      }
+
+      const fin = x(row.effect);
+      const mejor = row.effect >= 0;
+      const ancho = Math.max(2, Math.abs(fin - zero));
+      const inicio = mejor ? zero : zero - ancho;
+      // Extremo redondeado solo del lado que se aleja del cero: el cero es la línea base y una
+      // barra redondeada de los dos lados flota en vez de anclarse.
+      const r = Math.min(4, ancho);
+      const d = mejor
+        ? `M ${inicio} ${y} H ${inicio + ancho - r} A ${r} ${r} 0 0 1 ${inicio + ancho} ${y + r} V ${y + barH - r} A ${r} ${r} 0 0 1 ${inicio + ancho - r} ${y + barH} H ${inicio} Z`
+        : `M ${inicio + ancho} ${y} H ${inicio + r} A ${r} ${r} 0 0 0 ${inicio} ${y + r} V ${y + barH - r} A ${r} ${r} 0 0 0 ${inicio + r} ${y + barH} H ${inicio + ancho} Z`;
+
+      const valor =
+        `<text class="barvalue" x="${width - 76}" y="${cy + 4}">` + `${esc(row.detail)}</text>`;
+      return `<g>${titulo}${etiqueta}<path class="bar ${mejor ? 'mejor' : 'peor'}" d="${d}"/>${valor}</g>`;
+    })
+    .join('\n');
+
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="Dónde estás mejor y peor que tu rival de línea">
+  <text class="tag" x="${zero - half}" y="12">peor que el rival</text>
+  <text class="tag" x="${zero + half}" y="12" text-anchor="end">mejor que el rival</text>
+  <line class="zero" x1="${zero}" y1="${top - 6}" x2="${zero}" y2="${height - 8}"/>
+${barras}
+</svg>`;
+}
+
+export type PhaseBar = {
+  name: string;
+  /** Lo suyo menos lo del rival de línea, en CS por minuto. NaN si no hay con qué comparar. */
+  csDiff: number;
+  /** Los dos números crudos, para que la diferencia nunca viaje sola. */
+  detail: string;
+  games: number;
+  minutes: number;
+};
+
+/**
+ * Las tres fases: dónde se te va la ventaja entre el minuto 0 y el final.
+ *
+ * Es la misma gramática que `metricBarsSvg` —cero en el medio, azul a la derecha, naranja a la
+ * izquierda, extremo redondeado del lado que se aleja— pero NO la misma escala, y por eso es una
+ * función aparte: acá el largo son CS por minuto de verdad, no un tamaño de efecto. Reusar aquel
+ * builder habría puesto dos unidades distintas atrás de la misma longitud, que es exactamente
+ * cómo un gráfico miente sin decir nada falso.
+ *
+ * La escala se calcula sobre los datos, con un piso de 1 CS/min: sin el piso, tres fases parejas
+ * en 0.05 se dibujan como tres barras enormes.
+ *
+ * El número del rival va SIEMPRE al lado del suyo, porque todo esto está contaminado en el
+ * sentido de G-008 — el que va gana rota y farmea menos después del 14 — y la diferencia sola se
+ * leería como habilidad.
+ */
+export function phaseBarsSvg(rows: PhaseBar[], width = 720): string {
+  const medibles = rows.filter((r) => Number.isFinite(r.csDiff));
+  if (medibles.length === 0) {
+    return `<svg viewBox="0 0 ${width} 40" width="100%"><text class="tag" x="8" y="22">todavía no hay partidas con timeline para separar las fases</text></svg>`;
+  }
+
+  const gutter = 150;
+  const rowH = 34;
+  const barH = 15;
+  const top = 22;
+  const height = top + rows.length * rowH + 10;
+  const plot = width - gutter - 190;
+  const zero = gutter + plot / 2;
+  const half = plot / 2;
+  const extent = Math.max(1, ...medibles.map((r) => Math.abs(r.csDiff)));
+
+  const barras = rows
+    .map((row, i) => {
+      const cy = top + i * rowH + rowH / 2;
+      const y = cy - barH / 2;
+      const nombre =
+        `<text class="barlabel" x="${gutter - 10}" y="${cy + 1}" text-anchor="end">` +
+        `${esc(row.name)}</text>`;
+      const bajo =
+        `<text class="tag" x="${gutter - 10}" y="${cy + 14}" text-anchor="end">` +
+        `${esc(row.games === 0 ? 'sin partidas' : `${row.games} partidas`)}</text>`;
+      const titulo = `<title>${esc(`${row.name}: ${row.detail}`)}</title>`;
+
+      if (!Number.isFinite(row.csDiff)) {
+        return `<g>${titulo}${nombre}${bajo}<text class="tag" x="${zero + 6}" y="${cy + 4}">no llegaste a esta fase todavía</text></g>`;
+      }
+
+      const fin = zero + (row.csDiff / extent) * half;
+      const mejor = row.csDiff >= 0;
+      const ancho = Math.max(2, Math.abs(fin - zero));
+      const inicio = mejor ? zero : zero - ancho;
+      const r = Math.min(4, ancho);
+      const d = mejor
+        ? `M ${inicio} ${y} H ${inicio + ancho - r} A ${r} ${r} 0 0 1 ${inicio + ancho} ${y + r} V ${y + barH - r} A ${r} ${r} 0 0 1 ${inicio + ancho - r} ${y + barH} H ${inicio} Z`
+        : `M ${inicio + ancho} ${y} H ${inicio + r} A ${r} ${r} 0 0 0 ${inicio} ${y + r} V ${y + barH - r} A ${r} ${r} 0 0 0 ${inicio + r} ${y + barH} H ${inicio + ancho} Z`;
+
+      const signo = row.csDiff >= 0 ? '+' : '';
+      const valor =
+        `<text class="barvalue" x="${width - 184}" y="${cy + 1}">` +
+        `${esc(`${signo}${row.csDiff.toFixed(2)} CS/min`)}</text>` +
+        `<text class="tag" x="${width - 184}" y="${cy + 14}">${esc(row.detail)}</text>`;
+      return `<g>${titulo}${nombre}${bajo}<path class="bar ${mejor ? 'mejor' : 'peor'}" d="${d}"/>${valor}</g>`;
+    })
+    .join('\n');
+
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="Tu ventaja de CS por fase, contra tu rival de línea">
+  <text class="tag" x="${zero - half}" y="12">farmea más él</text>
+  <text class="tag" x="${zero + half}" y="12" text-anchor="end">farmeás más vos</text>
+  <line class="zero" x1="${zero}" y1="${top - 6}" x2="${zero}" y2="${height - 8}"/>
+${barras}
+</svg>`;
+}
+
+export type GrowthDot = {
+  /** Posición dentro de la historia de ESTA cuenta. El eje x son partidas, no fechas. */
+  index: number;
+  mineRolling: number;
+  theirsRolling: number;
+  win: boolean;
+};
+
+/**
+ * La curva de crecimiento: su media móvil contra la de su rival de línea, partida a partida.
+ *
+ * Dos series y NINGUNA línea de tendencia dibujada, que es la decisión que importa. Ajustar una
+ * recta acá y dibujarla sería afirmar con una forma lo que el texto de al lado tiene que
+ * retractar: sobre sus datos reales la pendiente es +0.083 / +0.030 / −0.015 según se suavice
+ * con 5, 10 o 20 partidas — el signo CAMBIA, así que no hay tendencia que leer (G-025). El
+ * número y su barrido van en la leyenda, donde se pueden calificar; el dibujo muestra las dos
+ * series y deja que la forma hable.
+ *
+ * El rival va abajo como referencia y no como rival: es el nivel del lobby que le tocó (ADR-012),
+ * que es lo único que separa "mejoré" de "me tocaron rivales peores". Por eso va en gris y
+ * punteado — es el fondo contra el que se lee su línea, no una segunda cosa que compite.
+ */
+export function growthCurveSvg(dots: GrowthDot[], width = 720, height = 220): string {
+  if (dots.length < 2) {
+    return `<svg viewBox="0 0 ${width} 40" width="100%"><text class="tag" x="8" y="22">hacen falta al menos dos partidas para dibujar una curva</text></svg>`;
+  }
+
+  const padL = 34;
+  const padR = 58;
+  const padT = 16;
+  const padB = 22;
+
+  const valores = dots.flatMap((d) => [d.mineRolling, d.theirsRolling]).filter(Number.isFinite);
+  const min = Math.min(...valores);
+  const max = Math.max(...valores);
+  // Un piso de rango: sin él, dos series que difieren en 0.2 llenan el alto y se leen como un
+  // abismo. El eje se abre a lo que haya, nunca menos de esto.
+  const span = Math.max(2, max - min);
+  const centro = (max + min) / 2;
+  const desde = centro - span / 2;
+  const hasta = centro + span / 2;
+
+  const x = (index: number): number => {
+    const primero = dots[0]?.index ?? 0;
+    const ultimo = dots[dots.length - 1]?.index ?? 1;
+    const rango = Math.max(1, ultimo - primero);
+    return padL + ((index - primero) / rango) * (width - padL - padR);
+  };
+  const y = (valor: number): number =>
+    height - padB - ((valor - desde) / (hasta - desde)) * (height - padT - padB);
+
+  const linea = (pick: (d: GrowthDot) => number): string =>
+    dots
+      .filter((d) => Number.isFinite(pick(d)))
+      .map((d) => `${x(d.index).toFixed(1)},${y(pick(d)).toFixed(1)}`)
+      .join(' ');
+
+  const ultimo = dots[dots.length - 1];
+  const etiquetas =
+    ultimo === undefined
+      ? ''
+      : `<text class="serielabel mia" x="${(x(ultimo.index) + 6).toFixed(1)}" y="${(y(ultimo.mineRolling) + 4).toFixed(1)}">vos</text>` +
+        `<text class="serielabel suya" x="${(x(ultimo.index) + 6).toFixed(1)}" y="${(y(ultimo.theirsRolling) + 4).toFixed(1)}">rival</text>`;
+
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="Tu media móvil contra la de tu rival de línea, partida a partida">
+  <text class="tag" x="2" y="${(padT + 4).toFixed(1)}">${hasta.toFixed(1)}</text>
+  <text class="tag" x="2" y="${(height - padB + 4).toFixed(1)}">${desde.toFixed(1)}</text>
+  <text class="tag" x="${padL}" y="${height - 4}">partida ${dots[0]?.index ?? 1}</text>
+  <text class="tag" x="${width - padR}" y="${height - 4}" text-anchor="end">${ultimo?.index ?? ''}</text>
+  <polyline class="serie suya" points="${linea((d) => d.theirsRolling)}"/>
+  <polyline class="serie mia" points="${linea((d) => d.mineRolling)}"/>
+${etiquetas}
+</svg>`;
+}
+
+/**
  * The matchup signature: every rep in grey, the mean on top.
  *
  * This is the EMPHASIS form, and it is the point of the drawing rather than its decoration. A
@@ -300,6 +560,20 @@ circle.own { fill: var(--own); fill-opacity: .8; stroke: #0b0d11; stroke-opacity
 circle.enemy { fill: var(--enemy); fill-opacity: .8; stroke: #0b0d11; stroke-opacity: .55; stroke-width: 1; }
 text.tag { fill: var(--muted); font-size: 10px; paint-order: stroke; stroke: #0b0d11;
            stroke-width: 3px; stroke-linejoin: round; }
+/* Las barras divergentes. El texto lleva tokens de texto y NUNCA el color de la barra: el color
+   es identidad de la marca, no de la palabra que está al lado. */
+path.bar.mejor { fill: var(--better); }
+path.bar.peor  { fill: var(--worse); }
+text.barlabel { fill: var(--fg); font-size: 12px; }
+text.barvalue { fill: var(--muted); font-size: 11px; }
+/* La curva de crecimiento. La suya es la línea; la del rival es el fondo contra el que se lee,
+   así que va gris y punteada: es el nivel del lobby, no un contrincante (ADR-012). */
+polyline.serie { fill: none; stroke-width: 2; }
+polyline.serie.mia { stroke: var(--better); }
+polyline.serie.suya { stroke: var(--grid); stroke-dasharray: 5 4; }
+text.serielabel { font-size: 11px; }
+text.serielabel.mia { fill: var(--better); }
+text.serielabel.suya { fill: var(--muted); }
 `;
 
 /**
@@ -313,6 +587,9 @@ export const SVG_VARS_DARK = `
 :root {
   --fg: #e5e7eb; --muted: #9ca3af; --plot: #1a1d24;
   --grid: #374151; --up: #4ade80; --down: #f87171; --own: #60a5fa; --enemy: #f87171;
+  /* Par divergente azul/naranja: pasa los seis checks contra este fondo, incluida la
+     separación bajo daltonismo (ΔE 26.8 en protanopía, contra 7.9 del verde/rojo). */
+  --better: #3987e5; --worse: #d95926;
 }
 `;
 
@@ -321,6 +598,7 @@ export const SVG_VARS = `
 :root {
   --fg: #1a1a1a; --muted: #6b7280; --plot: #f3f4f6;
   --grid: #d1d5db; --up: #15803d; --down: #b91c1c; --own: #2563eb; --enemy: #dc2626;
+  --better: #2a78d6; --worse: #eb6834;
 }
 @media (prefers-color-scheme: dark) {
 ${SVG_VARS_DARK.replace(':root {', '  :root {').trimEnd()}

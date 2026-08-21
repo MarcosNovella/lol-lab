@@ -8,10 +8,12 @@ import { createClient } from '../riot/client.ts';
 import type { Db } from '../store/db.ts';
 import { ASSETS_ROOT, openDb } from '../store/db.ts';
 import { backfillTimelines, resolveAccount, syncMatches } from '../sync.ts';
+import { bajarCatalogos, bajarImagenes, evaluarLedger } from '../upkeep.ts';
 import { renderShell } from './page.ts';
 import {
   abrirSesion,
   alcanceDe,
+  antes,
   camino,
   cerrarSesion,
   cobertura,
@@ -21,6 +23,8 @@ import {
   filtros,
   firma,
   graficos,
+  guardarKey,
+  lectura,
   ledger,
   momentos,
   partida,
@@ -34,6 +38,7 @@ import {
   type SyncEvento,
   sincronizar,
   taguear,
+  upkeep,
 } from './routes.ts';
 
 /**
@@ -386,6 +391,26 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
       json(response, 200, camino(db, alcance, url.searchParams.get('objetivo') ?? 'DIAMOND'));
       return;
     }
+    // ---- portado de la sesión del 19/08 ----
+    if (url.pathname === '/api/antes') {
+      json(response, 200, antes(db, cuenta));
+      return;
+    }
+    if (url.pathname === '/api/lectura') {
+      json(response, 200, lectura(db, cuenta, entero('limite', 40)));
+      return;
+    }
+    if (url.pathname === '/api/upkeep') {
+      json(response, 200, upkeep(db));
+      return;
+    }
+    if (url.pathname === '/api/key' && request.method === 'POST') {
+      // El valor viaja en el CUERPO y nunca en la URL: una query string queda en el historial
+      // del navegador y en cualquier log, y esto es la key (G-002).
+      const body = await readJson(request);
+      json(response, 200, guardarKey(str(body, 'valor')));
+      return;
+    }
     if (url.pathname === '/api/runas') {
       json(response, 200, runas(db, alcance));
       return;
@@ -452,6 +477,12 @@ export function startUi(options: { port?: number; db?: Db } = {}): Promise<UiSer
           const client = createClient();
           const result = await backfillTimelines(client, db, { puuid, max: 20, onProgress });
           return { fetched: result.fetched, errors: result.errors };
+        },
+        // Catálogos, imágenes y la evaluación del ledger, en cadena y sin terminal.
+        tareas: async (onProgress) => {
+          await bajarCatalogos(db, onProgress);
+          await bajarImagenes(db, onProgress);
+          evaluarLedger(db);
         },
         rango: async () => {
           await snapshotAll(db);

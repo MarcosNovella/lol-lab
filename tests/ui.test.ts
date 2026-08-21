@@ -964,3 +964,76 @@ describe('el detalle de una partida', () => {
     expect(() => partida(db, 'smurf', 'LA2_NO_EXISTE')).toThrow(RouteError);
   });
 });
+
+/**
+ * El mantenimiento colgado del botón de sincronizar.
+ *
+ * Viene de la sesión del 19/08 y es su decisión, no un extra: un ritual que depende de acordarse
+ * de correr `lol catalogos` y `lol assets` es un ritual que no se hace, y el costo no es
+ * cosmético — sin catálogo no hay tiempos de ítem ni keystones, sin imágenes el panel es texto.
+ */
+describe('las tareas de mantenimiento en el sync', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    upsertAccount(db, {
+      puuid: 'smurf-puuid',
+      gameName: 'LegendofTorcuato',
+      tagLine: 'LAS',
+      platform: 'la2',
+      label: 'smurf',
+    });
+  });
+
+  const okSync = async (
+    _puuid: string,
+    onProgress: (done: number, total: number) => void,
+  ): Promise<{ fetched: number; timelines: number; remakes: number; errors: string[] }> => {
+    onProgress(1, 1);
+    return { fetched: 1, timelines: 1, remakes: 0, errors: [] };
+  };
+
+  it('las corre DESPUÉS de las partidas y de los timelines, nunca antes', async () => {
+    const orden: string[] = [];
+    await sincronizar(db, 'smurf', () => {}, {
+      sync: async (p, cb) => {
+        orden.push('partidas');
+        return okSync(p, cb);
+      },
+      reparar: async () => {
+        orden.push('timelines');
+        return { fetched: 0, errors: [] };
+      },
+      tareas: async () => {
+        orden.push('tareas');
+      },
+    });
+    // Si el límite corta la corrida, que cueste el mantenimiento y nunca las partidas de anoche.
+    expect(orden).toEqual(['partidas', 'timelines', 'tareas']);
+  });
+
+  it('nombra la fase, porque la barra vuelve a cero y sin etiqueta parece un bug', async () => {
+    const eventos: SyncEvento[] = [];
+    await sincronizar(db, 'smurf', (e) => eventos.push(e), {
+      sync: okSync,
+      tareas: async (onProgress) => onProgress(1, 3, 'parche 16.16'),
+    });
+    const tareas = eventos.find((e) => e.tipo === 'progreso' && e.fase === 'tareas');
+    expect(tareas).toBeDefined();
+    if (tareas?.tipo === 'progreso') expect(tareas.detalle).toBe('parche 16.16');
+  });
+
+  it('un mantenimiento que falla NO convierte un sync bueno en uno fallido', async () => {
+    // Las partidas ya están en disco cuando esto corre, y las tareas son idempotentes: se
+    // reintentan solas la próxima vez que aprieta el botón.
+    const eventos: SyncEvento[] = [];
+    await sincronizar(db, 'smurf', (e) => eventos.push(e), {
+      sync: okSync,
+      tareas: async () => {
+        throw new Error('Data Dragon no contestó');
+      },
+    });
+    expect(eventos.at(-1)?.tipo).toBe('fin');
+  });
+});

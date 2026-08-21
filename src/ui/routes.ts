@@ -1,26 +1,44 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { benchmark, MIN_GAMES, mostPlayedRole, roleLabel } from '../analysis/benchmark.ts';
+import type { Briefing } from '../analysis/briefing.ts';
 import {
   abandonedByCutoff,
   closeSession,
   getTagCutoff,
   openSession,
   setTagCutoff,
+  splitByTag,
   TAGS,
   type Tag,
   tagGame,
+  taggedRows,
   tagOf,
   untaggedGames,
 } from '../analysis/capture.ts';
 import { clasesDe, type FilaClase, porClaseRival, sinClasificar } from '../analysis/classes.ts';
 import { type Camino, caminoA, TIERS, type Tier } from '../analysis/climb.ts';
 import { coverageOf, coverageTotals } from '../analysis/coverage.ts';
-import { biggestSwing, phaseSplit, type StateCurve, stateCurve } from '../analysis/curve.ts';
+import {
+  biggestSwing,
+  type PhaseSplit,
+  phaseAverages,
+  phaseSplit,
+  type StateCurve,
+  stateCurve,
+} from '../analysis/curve.ts';
+import {
+  DEFAULT_WINDOW,
+  type GrowthCurve,
+  GrowthError,
+  growthCurve,
+  trendSlope,
+} from '../analysis/growth.ts';
 import { evaluationsOf, listHypotheses, verdictLabel } from '../analysis/hypotheses.ts';
 import { itemRace } from '../analysis/items.ts';
 import { objectivesOf, roamsOf, tempoOf, visionOf } from '../analysis/macro.ts';
 import { collectMatchups } from '../analysis/matchups.ts';
-import { METRICS } from '../analysis/metrics.ts';
+import { METRICS, type Role } from '../analysis/metrics.ts';
 import {
   deathsOf,
   describeDeath,
@@ -40,8 +58,14 @@ import { describeRank, latestSnapshot, snapshotHistory, TRACKED_QUEUES } from '.
 import {
   type DeathDot,
   deathMapSvg,
+  type GrowthDot,
   goldCurveSvg,
+  growthCurveSvg,
   isOwnHalf,
+  type MetricBar,
+  metricBarsSvg,
+  type PhaseBar,
+  phaseBarsSvg,
   signatureSvg,
 } from '../analysis/render.ts';
 import {
@@ -55,7 +79,9 @@ import {
 } from '../analysis/runes.ts';
 import { type Firma, firmaDe, LECTURA_ES, lecturaDe } from '../analysis/signature.ts';
 import { mean, round } from '../analysis/stats.ts';
-import { keyState } from '../riot/key.ts';
+import { assembleBriefing, PregameError } from '../pregame.ts';
+import { KeyError, keyState, writeKey } from '../riot/key.ts';
+import { QUEUE } from '../riot/types.ts';
 import type { Db } from '../store/db.ts';
 import { ASSETS_ROOT } from '../store/db.ts';
 import {
@@ -74,6 +100,7 @@ import {
   matchIdsMissingTimeline,
   queryParticipants,
 } from '../store/matches.ts';
+import { type Upkeep, upkeepState } from '../upkeep.ts';
 
 /**
  * The UI's handlers, as functions over `Db` rather than over an HTTP request.
@@ -437,7 +464,13 @@ export type SyncEvento =
    * very different times: new games first, then the timelines of games already cached. A bar
    * that restarted at zero with no label read as a bug.
    */
-  | { tipo: 'progreso'; fase: 'partidas' | 'timelines'; hechas: number; total: number }
+  | {
+      tipo: 'progreso';
+      fase: 'partidas' | 'timelines' | 'tareas';
+      hechas: number;
+      total: number;
+      detalle?: string;
+    }
   | {
       tipo: 'fin';
       bajadas: number;
@@ -484,6 +517,18 @@ export async function sincronizar(
       puuid: string,
       onProgress: (done: number, total: number) => void,
     ) => Promise<{ fetched: number; errors: string[] }>;
+    /**
+     * Las tareas de mantenimiento, en cadena y después de todo lo demás.
+     *
+     * Portado de la sesión del 19/08, que es de donde sale `upkeep.ts`: un ritual que depende de
+     * acordarse de correr `lol catalogos` y `lol assets` es un ritual que no se hace, y el costo
+     * no es cosmético — sin catálogo no hay tiempos de ítem ni keystones, sin imágenes el panel
+     * es texto. Van ÚLTIMAS y cada una es idempotente, así que un corte no cuesta nada más que
+     * volver a apretar el botón.
+     */
+    tareas?: (
+      onProgress: (hechas: number, total: number, detalle: string) => void,
+    ) => Promise<void>;
     rango?: () => Promise<void>;
   },
 ): Promise<void> {
@@ -507,6 +552,18 @@ export async function sincronizar(
       reparados = repair.fetched;
       result.errors.push(...repair.errors);
     }
+    // Igual que el reloj de rango: si el mantenimiento falla, la sincronización YA está en
+    // disco y no puede reportarse como fallida.
+    if (deps.tareas) {
+      try {
+        await deps.tareas((hechas, total, detalle) =>
+          emit({ tipo: 'progreso', fase: 'tareas', hechas, total, detalle }),
+        );
+      } catch {
+        /* las tareas se reintentan solas la próxima vez: son idempotentes */
+      }
+    }
+
     // The rank clock is a nice-to-have and the sync is not: a failure here must not turn a
     // successful sync into a reported failure.
     if (deps.rango) {
@@ -1732,4 +1789,400 @@ export function ledger(db: Db): {
           : { veredicto: last.verdict, lectura: verdictLabel(last.verdict), n: last.n },
     };
   });
+}
+
+// ----------------------------------------------- portado de la sesión del 19/08
+//
+// Cuatro rutas que esa sesión construyó y esta base no tenía: el briefing previo a
+// jugar (ADR-022), pegar la key sin salir del panel, las vistas de lectura y el estado
+// del mantenimiento. Vienen como estaban salvo donde chocan con un cambio de esta
+// rama, y ahí se anota por qué.
+
+/**
+ * La curva de crecimiento y el barrido que decide si se puede leer.
+ *
+ * El barrido no es opcional. Sin él esta sección diría "vas mejorando +0.030 por partida" con
+ * cara de hallazgo, y sobre sus datos reales ese mismo número es +0.083 con ventana 5 y −0.015
+ * con ventana 20: el signo cambia, así que la respuesta honesta es "todavía no hay tendencia que
+ * leer" (G-025). Correr tres ventanas cuesta tres consultas locales sobre ≤40 partidas.
+ */
+function crecimientoDe(db: Db, puuid: string, label: string, rol: Role | null): Crecimiento | null {
+  const VENTANAS = [5, DEFAULT_WINDOW, 20];
+  const base = {
+    puuid,
+    accountLabel: label,
+    metricKey: 'cs_first_10',
+    queueId: QUEUE.soloq,
+    ...(rol !== null ? { role: rol } : {}),
+  };
+
+  let principal: GrowthCurve;
+  try {
+    principal = growthCurve(db, { ...base, window: DEFAULT_WINDOW });
+  } catch (error) {
+    // `growthCurve` se niega a curvar una métrica contaminada (G-008). Si eso pasa es un defecto
+    // de esta llamada, no un estado del usuario, así que no se traga.
+    if (error instanceof GrowthError) throw error;
+    throw error;
+  }
+  if (principal.points.length < 2) return null;
+
+  // La pendiente que se ENUNCIA se ajusta sobre la diferencia CRUDA partida a partida: sin
+  // suavizar no hay artefacto de suavizado del que sospechar, y es la estimación honesta.
+  const pendiente = trendSlope(principal.points, (p) => p.mine - p.theirs);
+
+  // El barrido se ajusta sobre la diferencia SUAVIZADA, que es lo único que la ventana cambia.
+  // La primera versión de esto barría sobre los valores crudos y devolvía el mismo número en
+  // las tres ventanas — un barrido que no barre, con toda la cara de haber verificado algo.
+  const barrido = VENTANAS.map((ventana) => ({
+    ventana,
+    pendiente: trendSlope(
+      ventana === DEFAULT_WINDOW
+        ? principal.points
+        : growthCurve(db, { ...base, window: ventana }).points,
+      (p) => p.mineRolling - p.theirsRolling,
+    ),
+  }));
+
+  const signos = new Set(
+    [pendiente, ...barrido.map((b) => b.pendiente)]
+      .filter(Number.isFinite)
+      .map((v) => Math.sign(v)),
+  );
+
+  return {
+    metrica: principal.metricLabel,
+    ventana: principal.window,
+    puntos: principal.points.length,
+    descartadas: principal.skipped,
+    pendiente,
+    barrido,
+    // Más de un signo entre el ajuste crudo y el barrido: la tendencia es un artefacto de cómo
+    // se la mira, y entonces no hay tendencia que leer.
+    inestable: signos.size > 1,
+    svg: growthCurveSvg(
+      principal.points.map((p) => ({
+        index: p.index,
+        mineRolling: p.mineRolling,
+        theirsRolling: p.theirsRolling,
+        win: p.win,
+      })),
+    ),
+  };
+}
+
+function valor(v: number, unit: string | null): string {
+  if (!Number.isFinite(v)) return '—';
+  if (unit === '%') return `${(v * 100).toFixed(1)}%`;
+  return Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2);
+}
+
+export type BarraLectura = Omit<MetricBar, 'effect'> & {
+  /**
+   * `null` es NO MEDIBLE, nunca cero.
+   *
+   * Explícito porque `JSON.stringify` convierte NaN en null solo, y una conversión silenciosa
+   * acá es la misma sustitución que G-014 frena en el borde de SQLite: quien lea el número del
+   * otro lado leería "no hay diferencia" donde el motor dijo "no se puede medir". El SVG se
+   * arma acá, del lado donde el NaN todavía es NaN.
+   */
+  effect: number | null;
+  percentil: number;
+  contaminada: boolean;
+};
+
+export type RepartoPorTag = {
+  poblaciones: {
+    tag: Tag;
+    n: number;
+    victorias: number;
+    /** null cuando n es demasiado chico para enunciar una tasa sin que parezca confiable. */
+    winrate: number | null;
+    /** Mediana de lo que tardó en taguear, en ms. NaN si la población está vacía. */
+    demoraMedianaMs: number;
+  }[];
+  tagueadas: number;
+  /** Nunca se doblan adentro: si se cayeran, cada tasa sería condicional a "las que taguéo". */
+  sinTaguear: number;
+  /** A partir de cuántas partidas se enuncia una tasa. */
+  minimo: number;
+};
+
+export type Crecimiento = {
+  metrica: string;
+  ventana: number;
+  puntos: number;
+  /** Partidas descartadas por no tener la métrica o no tener rival de línea. Nunca en silencio. */
+  descartadas: number;
+  /**
+   * Pendiente ajustada sobre la diferencia CRUDA partida a partida, por partida.
+   *
+   * Cruda y no suavizada a propósito: es la estimación que no depende de una perilla.
+   */
+  pendiente: number;
+  /**
+   * La misma pendiente ajustada sobre la diferencia SUAVIZADA, por ventana.
+   *
+   * Es lo único que la ventana mueve, y por eso es lo que dice si la tendencia se puede leer.
+   */
+  barrido: { ventana: number; pendiente: number }[];
+  /**
+   * true cuando el signo cambia según la ventana: entonces NO hay tendencia que leer.
+   *
+   * Es la lección más cara del proyecto puesta en un booleano. El "-0.147 por partida" que casi
+   * entró al ledger como predicción fechada era dos puntas de una media móvil; ajustado sobre
+   * los 39 puntos da +0.030, el signo opuesto (G-025).
+   */
+  inestable: boolean;
+  svg: string;
+};
+
+export type Lectura = {
+  cuenta: string;
+  rol: string;
+  cola: string;
+  partidas: number;
+  victorias: number;
+  derrotas: number;
+  winrate: number;
+  ventana: { desde: number | null; hasta: number | null };
+  rango: { cola: string; texto: string; wins: number | null; losses: number | null }[];
+  /** Métricas rankeables, de peor a mejor. Las contaminadas NO entran (G-008). */
+  barras: BarraLectura[];
+  /** Ya dibujado acá y no en el navegador: el builder es del motor y se testea como tal. */
+  barrasSvg: string;
+  mejor: string | null;
+  peor: string | null;
+  /** Cuántas quedaron afuera por estar contaminadas, para que el silencio no sea invisible. */
+  contaminadas: number;
+  campeones: { campeon: string; partidas: number; victorias: number }[];
+  /**
+   * A partir de cuántas partidas se puede enunciar una tasa.
+   *
+   * Uno solo para toda la pantalla, y el que el motor ya usa: si una tasa no se puede decir,
+   * tampoco se puede DIBUJAR. Una barra al 50% sobre 2 partidas se ve igual de sólida que una
+   * sobre 50, y el ojo la lee antes que al número que está al lado.
+   */
+  minimo: number;
+  /** Las tres fases contra el rival de línea, ya dibujadas. */
+  fasesSvg: string;
+  /** Cuántas de las partidas leídas tenían timeline: sin él no hay fases. */
+  conTimeline: number;
+  /** null hasta que exista el primer tag: la sección no se dibuja vacía. */
+  tags: RepartoPorTag | null;
+  /** null cuando no hay suficientes partidas con la métrica para dibujar una curva. */
+  crecimiento: Crecimiento | null;
+  notas: string[];
+};
+
+/**
+ * El briefing previo a la sesión, y la anotación de lo que le mostró.
+ *
+ * Ojo con lo que hace de más respecto a las demás rutas: ESCRIBE. Una exposición se anota cuando
+ * el foco se muestra, porque la contaminación empieza cuando la lee, no cuando la usa. Que el
+ * panel se abra después de jugar y también anote es el error en la dirección correcta: sobrestima
+ * la contaminación, y sobrestimarla nunca deja pasar un veredicto sucio como limpio.
+ *
+ * `SESSION_GAP_MS` hace que el polling de la página no infle el conteo: una fila de la tabla es
+ * una sentada, no un refresh.
+ */
+export function antes(db: Db, cuenta: string, now: number = Date.now()): Briefing {
+  try {
+    return assembleBriefing(db, cuenta, now);
+  } catch (error) {
+    if (error instanceof PregameError) throw new RouteError(404, error.message);
+    throw error;
+  }
+}
+
+/**
+ * Guarda una key nueva desde el panel. Devuelve el estado, NUNCA el valor (G-002).
+ *
+ * Es un POST y no un GET a propósito: una query string queda en el log del servidor, en el
+ * historial del navegador y en cualquier captura de la barra de direcciones. El cuerpo de un POST
+ * no.
+ */
+export function guardarKey(valor: string, now: number = Date.now()): EstadoKey {
+  try {
+    writeKey(valor);
+  } catch (error) {
+    if (error instanceof KeyError) throw new RouteError(400, error.message);
+    throw error;
+  }
+  const key = keyState(new Date(now));
+  return {
+    presente: key.present,
+    tipo: key.kind,
+    horasDesdeQueSePego: key.hoursSinceUpdate,
+    probablementeVencida: key.likelyExpired,
+    problema: key.problem,
+    archivo: key.envPath,
+  };
+}
+
+export function upkeep(db: Db): Upkeep {
+  return upkeepState(db);
+}
+
+/**
+ * Lo que él pidió: entrar, mirar diez minutos y saber qué está fallando y qué está haciendo bien.
+ *
+ * Todo sale de `benchmark()`, que compara contra los OTROS NUEVE JUGADORES de sus propias
+ * partidas (ADR-002) — en las métricas por rol, exactamente su rival de línea. No hay promedio de
+ * Platino sacado de otro lado.
+ *
+ * Lo que NO entra es tan importante como lo que entra: una métrica contaminada —CS por minuto,
+ * KDA, daño— no puede encabezar nada, porque su media está dominada por las partidas que ganó
+ * (G-008). Se cuentan y se dice cuántas quedaron afuera, para que el silencio sea visible.
+ */
+export function lectura(db: Db, cuenta: string, limite = 40): Lectura {
+  const { puuid, label } = cuentaDe(db, cuenta);
+  const rol = mostPlayedRole(db, puuid, QUEUE.soloq);
+
+  const result = benchmark(db, {
+    puuid,
+    accountLabel: label,
+    ...(rol !== null ? { role: rol } : {}),
+    queueId: QUEUE.soloq,
+    queueLabel: 'soloq',
+    limit: limite,
+  });
+
+  const rankeables = result.comparisons.filter((c) => c.rankable && c.enoughData);
+  const ordenadas = [...rankeables].sort((a, b) => a.score - b.score);
+  // `effect` pasó a ser `number | null` en la otra rama de esta misma semana: G-009 hizo que
+  // una métrica que NO es una magnitud (una bandera 0/1) no reciba tamaño de efecto en vez de
+  // recibir uno que no significa nada. El filtro de arriba ya deja fuera esas — una bandera no
+  // es `rankable` — así que acá el null no puede llegar, y lo que sí puede llegar es NaN, que
+  // es "no medible" y esta vista ya sabe dibujar. El `?? Number.NaN` dice las dos cosas: que el
+  // null es inalcanzable y que si algún día llega, NO se convierte en cero.
+  const paraDibujar: MetricBar[] = ordenadas.map((c) => ({
+    label: c.label,
+    effect: c.effect ?? Number.NaN,
+    detail: `${valor(c.yours, c.unit)} vs ${valor(c.peerMean, c.unit)}`,
+    games: c.games,
+  }));
+  const barras: BarraLectura[] = paraDibujar.map((b, i) => {
+    const c = ordenadas[i];
+    return {
+      label: b.label,
+      detail: b.detail,
+      games: b.games,
+      effect: Number.isFinite(b.effect) ? b.effect : null,
+      percentil: c?.percentile ?? 0,
+      contaminada: c === undefined || c.contamination !== 'causal',
+    };
+  });
+
+  const campeones = new Map<string, { partidas: number; victorias: number }>();
+  for (const row of queryParticipants(db, {
+    puuid,
+    queueId: QUEUE.soloq,
+    limit: limite,
+    ...(rol !== null ? { role: rol } : {}),
+  })) {
+    const actual = campeones.get(row.champion) ?? { partidas: 0, victorias: 0 };
+    actual.partidas += 1;
+    if (row.win) actual.victorias += 1;
+    campeones.set(row.champion, actual);
+  }
+
+  // Las fases necesitan timeline, que no todas las partidas tienen: las que no, no cuentan como
+  // una fase de cero, no cuentan para nada (G-005).
+  const porPartida: PhaseSplit[][] = [];
+  let conTimeline = 0;
+  for (const row of queryParticipants(db, {
+    puuid,
+    queueId: QUEUE.soloq,
+    limit: limite,
+    ...(rol !== null ? { role: rol } : {}),
+  })) {
+    const partido = getRawMatch(db, row.matchId);
+    const timeline = getRawTimeline(db, row.matchId);
+    if (partido === null || timeline === null) continue;
+    const split = phaseSplit(partido, timeline, puuid);
+    if (split === null) continue;
+    conTimeline += 1;
+    porPartida.push(split);
+  }
+  const fases = phaseAverages(porPartida);
+
+  // El reparto por tag: lo único que separa "jugué mal" de "me tocó mal", y lo único acá que no
+  // sale de la API sino de él. Se compara contra el RESULTADO, nunca contra los otros jugadores:
+  // no existe el tag del rival, así que una comparación con pares tendría un lado vacío y
+  // devolvería un número igual (`peerComparable` lo prohíbe por construcción).
+  const filas = taggedRows(db, puuid);
+  const reparto = splitByTag(filas, untaggedGames(db, puuid, { limit: 500 }).length);
+  const tags: RepartoPorTag | null =
+    reparto.tagged === 0
+      ? null
+      : {
+          poblaciones: reparto.populations.map((p) => ({
+            tag: p.tag,
+            n: p.n,
+            victorias: p.wins,
+            // Una tasa sobre 3 partidas se lee tan segura como una sobre 300 y no lo es. Se usa
+            // el mismo mínimo que el benchmark ya aplica, no uno inventado para esta pantalla.
+            winrate: p.n >= MIN_GAMES ? Math.round((p.wins / p.n) * 100) : null,
+            demoraMedianaMs: p.medianLagMs,
+          })),
+          tagueadas: reparto.tagged,
+          sinTaguear: reparto.untagged,
+          minimo: MIN_GAMES,
+        };
+
+  // ¿Estoy mejorando? La única métrica causal continua que hay, y el rival dibujado debajo
+  // porque es lo único que separa "mejoré" de "me tocaron rivales peores" (ADR-012).
+  const crecimiento = crecimientoDe(db, puuid, label, rol);
+
+  return {
+    cuenta: label,
+    rol: result.role === 'todos' ? 'todos los roles' : roleLabel(result.role),
+    cola: result.queue,
+    partidas: result.games,
+    victorias: result.wins,
+    derrotas: result.games - result.wins,
+    winrate: result.winRate,
+    ventana: { desde: result.window.from, hasta: result.window.to },
+    rango: TRACKED_QUEUES.map((cola) => {
+      const snapshot = latestSnapshot(db, puuid, cola);
+      return {
+        cola,
+        texto: describeRank(snapshot),
+        wins: snapshot?.wins ?? null,
+        losses: snapshot?.losses ?? null,
+      };
+    }),
+    barras,
+    barrasSvg: metricBarsSvg(paraDibujar),
+    // El titular sale de la SEVERIDAD que el motor ya calculó, no de "el primero de la lista".
+    // Ordenada, la lista siempre tiene un primero: sobre datos donde todas las métricas empatan
+    // eso titulaba "lo que mejor hacés: Placas de torreta" con una diferencia de exactamente
+    // cero. Una etiqueta segura sobre nada es peor que no decir nada.
+    mejor: result.strongest.find((c) => c.severity === 'fuerte')?.label ?? null,
+    peor:
+      result.weakest.find((c) => c.severity === 'crítico' || c.severity === 'flojo')?.label ?? null,
+    contaminadas: result.comparisons.filter((c) => !c.rankable).length,
+    campeones: [...campeones]
+      .map(([campeon, v]) => ({ campeon, ...v }))
+      .sort((a, b) => b.partidas - a.partidas),
+    fasesSvg: phaseBarsSvg(
+      fases.map((f) => ({
+        name: f.name,
+        csDiff: f.csDiff,
+        games: f.games,
+        minutes: f.minutes,
+        // Los dos números crudos, siempre: la diferencia sola se leería como habilidad, y todo
+        // esto está contaminado por ir ganando (G-008).
+        detail: Number.isFinite(f.csDiff)
+          ? `${f.csPerMin.toFixed(2)} vs ${f.opponentCsPerMin.toFixed(2)} CS/min`
+          : 'sin rival de línea medible',
+      })),
+    ),
+    conTimeline,
+    minimo: MIN_GAMES,
+    tags,
+    crecimiento,
+    notas: result.notes,
+  };
 }

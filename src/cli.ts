@@ -1,3 +1,4 @@
+import * as antes from './cli/antes.ts';
 import * as assets from './cli/assets.ts';
 import * as backfill from './cli/backfill.ts';
 import * as cerrar from './cli/cerrar.ts';
@@ -40,6 +41,7 @@ const COMMANDS: Record<string, Command> = {
   // First in the list because it is first in time: nothing else works before an account exists.
   cuenta: { summary: cuenta.SUMMARY, usage: cuenta.USAGE, run: cuenta.run },
   ui: { summary: ui.SUMMARY, usage: ui.USAGE, run: ui.run },
+  antes: { summary: antes.SUMMARY, usage: antes.USAGE, run: antes.run },
   cerrar: { summary: cerrar.SUMMARY, usage: cerrar.USAGE, run: cerrar.run },
   report: { summary: report.SUMMARY, usage: report.USAGE, run: report.run },
   prep: { summary: prep.SUMMARY, usage: prep.USAGE, run: prep.run },
@@ -71,7 +73,8 @@ function help(): void {
   out('Uso:');
   for (const command of new Set(Object.values(COMMANDS).map((c) => c.usage))) out(`  ${command}`);
   out();
-  out('El ritual es `lol cerrar`. Todo lo demás es para cuando querés mirar algo puntual.');
+  out('El ritual son dos: `lol antes` cuando te sentás y `lol cerrar` cuando terminás.');
+  out('Todo lo demás es para cuando querés mirar algo puntual.');
 }
 
 const [, , name, ...rest] = process.argv;

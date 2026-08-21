@@ -19,10 +19,12 @@ import { sameChampion } from './analysis/names.ts';
 import { confidenceOf, prepMatchup } from './analysis/prep.ts';
 import { loadPriors, priorFor, priorsKeyedLike } from './analysis/priors.ts';
 import { describeRank, latestSnapshot, snapshotHistory, TRACKED_QUEUES } from './analysis/rank.ts';
+import { assembleBriefing, PregameError } from './pregame.ts';
 import { createClient } from './riot/client.ts';
 import { keyState } from './riot/key.ts';
 import { platformLabel } from './riot/routing.ts';
 import { QUEUE, type QueueName, queueLabel } from './riot/types.ts';
+import { exposureOf, gamesSince } from './store/briefings.ts';
 import { type Db, openDb } from './store/db.ts';
 import {
   cacheStats,
@@ -707,6 +709,14 @@ server.registerTool(
           `necesita n=${h.nNeeded} · ${h.gapGames} en el hueco declarado`,
       );
       lines.push(`  cautela: ${h.caveat}`);
+      // El asterisco: una fila que le mostramos antes de jugar ya no tiene ventana ciega.
+      const exposicion = exposureOf(database(), h.id);
+      if (exposicion !== null) {
+        lines.push(
+          `  EXPUESTA desde ${new Date(exposicion.first).toISOString().slice(0, 10)} · ` +
+            `${gamesSince(database(), h.spec.puuid, exposicion.first)} partida(s) sabiéndola`,
+        );
+      }
       if (measure !== null) {
         // The spec is handed back explicitly so a drifted call site fails loudly (G-013).
         const e = evaluateHypothesis(database(), h.id, h.spec, measure);
@@ -821,6 +831,68 @@ server.registerTool(
           `${history.length} cambio(s) registrado(s) desde ${localDate(
             history[history.length - 1]?.observedAt ?? latest.observedAt,
           )}`,
+      );
+    }
+    return text(lines.join('\n'));
+  },
+);
+
+server.registerTool(
+  'lol_antes',
+  {
+    title: 'El briefing de antes de jugar',
+    description:
+      'Lo que hay que arreglar antes de la sesión, UN foco sacado del ledger y el reloj. ' +
+      'Anota lo que muestra: mostrar una hipótesis viva la contamina a propósito, y desde ' +
+      'cuándo la sabe tiene que quedar registrado (ADR-022).',
+    inputSchema: {
+      account: z.string().describe('Etiqueta, Riot ID o nombre de la cuenta que va a jugar'),
+    },
+  },
+  async ({ account }) => {
+    let briefing: ReturnType<typeof assembleBriefing>;
+    try {
+      briefing = assembleBriefing(database(), account);
+    } catch (error) {
+      if (error instanceof PregameError) return text(error.message);
+      throw error;
+    }
+
+    const lines: string[] = [`Antes de jugar — cuenta ${briefing.account}`, ''];
+
+    lines.push('PISTA LIBRE');
+    if (briefing.runway.length === 0) lines.push('  Nada que arreglar.');
+    for (const a of briefing.runway) lines.push(`  [${a.urgencia}] ${a.que} — ${a.porque}`);
+    lines.push('');
+
+    lines.push('EL FOCO');
+    if (briefing.focus === null) {
+      lines.push(`  ${briefing.noFocusReason ?? 'Nada registrado que mostrar.'}`);
+    } else {
+      lines.push(`  ${briefing.focus.id} — ${briefing.focus.claim}`);
+      lines.push(`  cautela: ${briefing.focus.caveat}`);
+      lines.push(`  le faltan ${briefing.focus.shortfall} mediciones · ${briefing.focus.why}`);
+    }
+    for (const w of briefing.withheld) {
+      lines.push(
+        w.reason === 'sin_evaluar'
+          ? `  GUARDADA: ${w.id} (nunca evaluada: no se sabe cuánto acumuló)`
+          : `  GUARDADA: ${w.id} (le faltan ${w.shortfall}, todavía puede dar veredicto)`,
+      );
+    }
+    lines.push('');
+
+    lines.push('EL RELOJ');
+    for (const r of briefing.clock) {
+      const wl = r.wins === null || r.losses === null ? '' : ` (${r.wins}W-${r.losses}L)`;
+      lines.push(`  ${r.queue}: ${r.text}${wl}`);
+    }
+
+    if (briefing.silence !== null) {
+      lines.push('');
+      lines.push(
+        `NO PUEDO HABLAR de ${briefing.silence.muted} de ${briefing.silence.total} matchups ` +
+          'todavía. En champ select, pedime lol_prep del que le toque.',
       );
     }
     return text(lines.join('\n'));

@@ -3,6 +3,14 @@
 Goal: grow this repo from "MCP over the Riot API" into `lol-lab`, the engine that says what to
 do differently NEXT game. Plan APPROVED 2026-08-16: `~/.claude/plans/lol-lab-plan.md`.
 
+> **NEXT SESSION: READ `roadmap.md` §A FIRST.** It holds the dated plan agreed on 2026-08-19 —
+> Marcos starts climbing on the MAIN on **Monday 24/08** and wants something that genuinely helps
+> by **Monday 31/08**. One item there is irreversible if missed: **every registered hypothesis
+> carries the smurf's puuid inside its frozen spec, so the ledger STOPS ACCRUING the moment he
+> switches accounts.** The same specs have to be re-registered against the main's puuid on Monday
+> BEFORE his first ranked game, on a freshly synced cache (G-027). Play twenty games first and
+> those twenty fall inside the baseline forever.
+
 Accounts: `LegendofTorcuato#LAS` (smurf = practice, Platinum II) and `LaMarso#LAS` (main = the
 climb, level 301, unranked). LAS => `la2` / `americas`. The main is ladder-serious from game 1.
 Cross-account rule, SETTLED: **knowledge pools across accounts, performance does not.** Matchup
@@ -17,9 +25,10 @@ numerator of a cross-account win rate.
 ## What exists
 
 `src/analysis/*` is the engine and is pure and I/O-free; everything else is a front-end over it
-(ADR-006). Three of them, no duplicated arithmetic: `src/server.ts` (MCP, 14 tools), `src/cli.ts`
-(`lol cerrar · report · prep · cobertura · growth · page · hip · rank · ui`) and `src/ui/*` (the
-local panel, ADR-018).
+(ADR-006). Three of them, no duplicated arithmetic: `src/server.ts` (MCP, 15 tools), `src/cli.ts`
+(`lol antes · cerrar · report · prep · cobertura · growth · page · hip · rank · items · assets ·
+ui`) and `src/ui/*` (the local panel, ADR-018). Composition that all three need and that cannot
+be pure lives beside them: `src/sync.ts` and now `src/pregame.ts`.
 
 Analysis modules: `state`/`conversion` (lane state at a minute, `restOfTeamGoldDiff` with his own
 lane pair removed) · `events`/`moments` (deaths, fights, expensive moments) · `curve` (state
@@ -28,7 +37,8 @@ curve, `biggestSwing`, `phaseSplit`) · `macro` (objectives, vision timing, temp
 `growth` (per-account curve vs the lane opponent, `drift` and `trendSlope`) · `hypotheses` +
 `measures` (the ledger, one measure dispatching on a frozen spec) · `capture` (play sessions and
 reported tags) · `coverage` · `rank` · `render` (SVG + its CSS) · `names` · `priors` · `metrics`
-(every metric declares `contamination`).
+(every metric declares `contamination`) · `items` (build timings against the lane opponent) ·
+`briefing` (what may be said BEFORE a game, ADR-022).
 
 Cache: SQLite at `data/riot.db`, gitignored and single-machine. As of the sync of 2026-08-19
 00:05 UTC: 86 matches, 82 timelines (the 4 missing are remakes), 2 accounts, 7 hypothesis rows
@@ -245,6 +255,186 @@ Pedido suyo: que se entienda de un vistazo. ADR-021.
 
 verify verde, 289 tests. Visto en el navegador, no supuesto.
 
+## S9 2026-08-19, CLOUD — the other half of the ritual
+
+Code-only session (D1: nube = código, local = datos), so nothing below was run against the real
+cache. `pnpm verify` green here on Node 22.22, 309 tests.
+
+**Roadmap §3.2 is closed: there is a pre-game moment now.** `lol antes`, `lol_antes` and a panel
+section, over `src/analysis/briefing.ts` (pure) and `src/pregame.ts` (the composition + the one
+write). ADR-022.
+
+- **The design decision is a refusal.** Showing him a live hypothesis before a game contaminates
+  it on purpose — §4.8 already recorded that — so the briefing shows AT MOST ONE, and only a row
+  whose verdict is out of reach. On today's ledger that means `ward_before_objective_60s` (931
+  short) is spendable and `diana_needs_a_lead` (20 short) is WITHHELD, with the panel saying so:
+  the silence is a decision, not a hole.
+- **The horizon knob was swept and the first claim about it was FALSE.** The comment said the
+  partition is stable from 100 to 400; the test proved it changes at 270, where
+  `lead_conversion_gap` flips to withheld. 200 sits inside the real insensitive range (100-269).
+  Both the comment and the test now say the true bound, and the boundary is pinned.
+- **`briefing_exposures`** (append-only, deduped to one row per sitting) turns the contamination
+  into a number: `lol hip` and `lol_hypotheses` now print `EXPUESTA desde <fecha> · N sentada(s) ·
+  M partida(s) jugadas sabiéndola` on any row he has been shown. There is deliberately no flag to
+  preview without recording.
+- **G-029 born from running it.** A hypothesis that had never been evaluated arrived as `n = 0`,
+  so its shortfall was the whole of `nNeeded` and it looked FURTHER from a verdict than any
+  evaluated row — making an unevaluated ledger maximally talkative, exactly backwards, and the
+  exposure it spends cannot be undone. `n` is `number | null` now; a null is withheld with its own
+  reason and the briefing says to run `lol hip evaluar` first. The tests were green before this
+  was found; `lol antes` against a seeded cache is what found it.
+- **One implementation of "what is broken", not two.** The panel's `acciones` and the briefing's
+  runway are the same list under two framings, so `estado()` now delegates to the pure `runway()`.
+  Behaviour is unchanged and the 43 UI tests passed untouched.
+- The panel's old "Antes de entrar" (the matchup lookup) is now **"En champ select"**, so the two
+  pre-game moments read as different things: the session briefing and the per-game matchup.
+- Seen in a browser, not assumed: served, screenshotted and read.
+
+### What is NOT built, deliberately
+- The briefing never invents advice. Everything it can say comes from the ledger, so if the
+  ledger is empty it says exactly that.
+- `lol antes` has no `--sin-anotar`. A register that can be bypassed is a register that lies at
+  the exact moment it has to be believed.
+
+### S9b — el panel hace las tareas, y ya no hay que correr nada
+
+Su pedido, textual: *"yo no quiero correr nada, yo quiero que la ui tenga botones y haga las cosas
+sola"*. Tenía razón y era un defecto de diseño, no una preferencia: tres de los cuatro comandos
+que quedaban eran cosas que hay que ACORDARSE de correr, y cada olvido tiene un costo real —
+sin catálogo no hay tiempos de ítem, sin imágenes el panel es texto, y sin evaluar el ledger el
+briefing de S9 no puede mostrar nada (G-029). ADR-023 y ADR-024.
+
+- **`src/upkeep.ts`**: catálogos de ítems, imágenes y evaluación del ledger, en una sola
+  implementación. `lol items` y `lol assets` se reescribieron encima de ella, así que ya no hay
+  dos versiones de "qué falta". Cada tarea es idempotente y calcula el faltante con una consulta
+  LOCAL, que es lo que hace que se puedan correr siempre.
+- **El botón de sincronizar corre la cadena entera** — partidas → rango → catálogos → imágenes →
+  ledger (esto último solo si entraron partidas, porque sin evidencia nueva una evaluación es una
+  fila idéntica). Pueden ser automáticas porque **ninguna gasta un request de Riot**: Data Dragon
+  es otro host y sin key, y evaluar es aritmética local. El sync de partidas, que sí gasta, sigue
+  siendo un botón que él aprieta.
+- **Sección "Puesta al día"** con lo que falta y un botón por tarea, para cuando falta algo y no
+  viene de sincronizar. Y las acciones de "Qué hacer ahora" ahora EJECUTAN: sincronizar, ir a
+  taguear, pegar la key.
+- **La key se pega en el panel** (ADR-024). Era la fricción más frecuente que existe —vence cada
+  24 h— y el último paso que lo sacaba del panel. Cierra además el incidente de S8b: la pegó en
+  `.env.example`, que está trackeado y va a un repo público. Va por POST y nunca por query string,
+  el input es password y se limpia al guardar, la respuesta no trae el valor (G-002) y lo que no
+  empieza con `RGAPI-` se rechaza ANTES de tocar el archivo.
+- **G-030, dos veces en una sesión.** `writeKey` escribía al `.env` del proyecto: el primer test
+  le habría borrado su key REAL en cada `pnpm verify`, en silencio, y se habría enterado como un
+  401. Y `upkeepState` contaba PNGs en el `data/img` real, así que su test pasaba en una máquina
+  sin arte bajado y fallaba en una con arte — falló acá en el momento en que corrí la descarga,
+  que es como se encontró. Las dos toman la ruta por parámetro ahora, con la forma de `openDb`.
+- Bajado y visto de verdad contra Data Dragon: 1 catálogo, 244 imágenes, 2,1 MB, y la segunda
+  corrida dice "0 nuevas, 244 ya estaban".
+- `lol items --todo` (forzar rebajada) se perdió en la reescritura. No estaba documentado en
+  ningún lado y Data Dragon es inmutable por versión, así que solo servía si un catálogo se
+  hubiera guardado corrupto.
+
+verify verde, 320 tests.
+
+### S9c — el panel se lee, no se opera
+
+Pedido suyo: entrar, mirar diez minutos y salir sabiendo qué está fallando, qué no repetir y
+también qué está haciendo bien, con más imágenes. ADR-025 y ADR-026.
+
+- **"Cómo venís" arriba de todo**: rango, récord de las últimas 12, qué hace mejor y peor contra
+  su rival de línea, un gráfico de barras divergentes, y sus campeones con foto y su récord. Lo
+  operativo (sincronizar, taguear, puesta al día, key) quedó agrupado abajo bajo encabezados.
+- **La lectura es `benchmark()`, que ya existía y NUNCA había estado en pantalla.** Compara contra
+  los otros nueve jugadores de sus propias partidas, que para una métrica de rol es exactamente su
+  rival de línea (ADR-002).
+- **Lo que se niega a mostrar es el punto.** Una métrica contaminada puede dibujarse pero no puede
+  encabezar (G-008), así que las 14 que quedan afuera se CUENTAN en pantalla. Y el titular se lee
+  de la `severity` que el motor ya calcula, no de "el primero de la lista" (G-032).
+- **`metricBarsSvg`**, el gráfico nuevo, en `analysis/render.ts` como todos los demás. El par de
+  colores se eligió CORRIENDO el validador, no a ojo: verde/rojo mide ΔE 7.9 bajo deuteranopía
+  contra 26.8 del azul/naranja. La posición ya codifica el signo, así que el color es redundante y
+  el gráfico se lee igual sin distinguir los colores. El largo es el tamaño del efecto, recortado
+  en ±1.5, porque una diferencia de 8 de CS y una de 0.3 de participación no comparten escala.
+- G-031: `pnpm verify` empezó a fallar sin decir por qué — el único error real estaba tapado por
+  los ~110 infos de `useLiteralKeys` ("Diagnostics not shown: 94"). El script usa
+  `--diagnostic-level=warn` ahora, y encontrarlo costó un bisect contra HEAD limpio.
+- Visto en el navegador dos veces: la primera versión cortaba la etiqueta larga
+  ("*ntaja* de oro+XP en fase de líneas"), que sin mirarlo no se veía.
+
+verify verde, 329 tests.
+
+### S9d — las fases, dibujadas
+
+`phaseAverages` (puro, en `curve.ts`) + `phaseBarsSvg`, en la lectura. ADR-027.
+
+- **Cada fase tiene su propio n**: una partida de 22 minutos aporta a línea y a medio y NO al
+  cierre. Contarla como un cierre de cero minutos hundiría el promedio de una fase que esa
+  partida nunca jugó.
+- **Las tasas se ponderan por MINUTO jugado, no por partida**: un cierre de 2 minutos y uno de 20
+  no pueden pesar igual, o un puñado de segundos mueve la fase entera.
+- **Las dos puntas se comparan sobre las MISMAS partidas.** Si en algunas no hay rival de línea
+  medible, su promedio y el del rival saldrían de muestras distintas (G-015); la diferencia se
+  calcula solo sobre las partidas donde los dos existen, y su promedio general se reporta aparte.
+- Un rival ausente NO es un rival que farmeó cero (G-005).
+- **La leyenda dice que después del 14 esto no se lee como habilidad.** Todo `phaseSplit` está
+  contaminado en el sentido de G-008 — el que va ganando rota y farmea menos — así que una
+  ventaja que se achica puede ser exactamente lo que hace bien. Por eso el número del rival va
+  al lado del suyo y la diferencia nunca viaja sola.
+- Builder aparte y no un parámetro de escala en `metricBarsSvg`: aquellas barras son tamaños de
+  efecto y estas son CS/min de verdad. Una misma longitud con dos unidades atrás es cómo un
+  gráfico miente sin decir nada falso.
+- Visto en el navegador: la barra más larga del gráfico de métricas terminaba PEGADA al número.
+
+verify verde, 334 tests.
+
+### S9e — el reparto por tag, y el panel deja de estar cableado a una cuenta
+
+- **El reparto por tag está en la lectura** (ADR-028) y **NO se dibuja hasta que exista el primer
+  tag**: una sección con tres ceros se lee como "acá no pasa nada" en vez de "todavía no hay nada
+  que leer", y con el backlog cerrado por decisión ese es su estado por semanas.
+- Se compara contra el RESULTADO y nunca contra otros jugadores: no existe el tag del rival, así
+  que una comparación con pares tendría un lado vacío y devolvería un número igual —
+  `peerComparable` ya lo prohíbe por construcción.
+- Las sin taguear se reportan al lado y NUNCA se doblan adentro: si se cayeran, cada tasa sería
+  en realidad "de las que se acordó de taguear", y acordarse no es independiente de cómo salió.
+- **Un solo mínimo para toda la pantalla**, el `MIN_GAMES` que el benchmark ya usa: vale para el
+  porcentaje de un tag, el de un campeón y la barra de los dos.
+- **G-033**: y ahí estaba el defecto. El código se negaba correctamente a enunciar el porcentaje
+  bajo el mínimo y dibujaba la barra igual, así que "salía igual · 1W-1L" pintaba media barra tan
+  sólida como una sobre cincuenta partidas, y Ahri con 3W-0L pintaba la barra ENTERA. Escrito en
+  la misma sesión que la guarda que retiene el número. Ningún test lo veía: la aserción estaba
+  sobre el payload y el defecto estaba en la geometría. Se encontró mirando la captura.
+- **El panel ya no está cableado a `smurf`** (ADR-029). Toda llamada del cliente mandaba
+  `cuenta=smurf`, así que la MAIN —la que es en serio desde la partida uno— no se veía en ningún
+  lado salvo su propia tarjeta. Ahora hay selector, arranca en la cuenta sincronizada más
+  recientemente (la que viene jugando, no la primera alfabética) y la elección sobrevive al
+  reinicio.
+
+verify verde, 340 tests.
+
+### S9f — la curva de crecimiento, con su barrido al lado
+
+- **"¿Estoy mejorando?" está en el panel** (ADR-030). Su media móvil de CS@10 contra la de su
+  rival de línea, partida a partida, con el rival en gris punteado abajo: es el nivel del lobby
+  (ADR-012), lo único que separa "mejoré" de "me tocaron rivales peores".
+- **No se dibuja ninguna recta de tendencia.** Una recta afirmaría con una forma lo que el
+  párrafo de abajo retracta, y la forma se lee primero. El número va en el texto, donde se puede
+  calificar.
+- **La pendiente que se enuncia se ajusta sobre la diferencia CRUDA** (ninguna perilla la mueve);
+  **el barrido se ajusta sobre la SUAVIZADA** a 5/10/20, que es lo único que la ventana mueve. Si
+  los signos no coinciden, el panel dice "todavía no hay tendencia que leer" en vez de una
+  pendiente.
+- **G-034, y es el defecto de la sesión.** La primera versión barría sobre los valores crudos, así
+  que las tres ventanas devolvían +0.1538 EXACTAMENTE y el panel mostraba "mismo signo en las
+  tres" con total seguridad. Un barrido atado a algo que la perilla no toca: parecía la evidencia
+  más fuerte posible de estabilidad y no era evidencia de nada. Lo vi leyendo los tres números
+  idénticos en el payload; los tests pasaban todos, porque asertaban la FORMA del barrido (tres
+  ventanas, pendientes finitas) y no que los valores difirieran.
+
+verify verde, 343 tests.
+
+### Lo que la lectura TODAVÍA no muestra
+- El reparto por tag ya está, pero **sobre su caché real va a mostrar cero** hasta que tague:
+  el backlog se cerró por decisión (ADR-019) y el tagueo arranca con su próxima partida.
+
 ## S9 2026-08-20, CLOUD — la auditoría, y las siete cosas que encontró
 
 Sesión de revisión pedida en esos términos: "chequeá que todo lo que tenemos está bien y
@@ -454,7 +644,15 @@ verify verde, **377 tests** (351 → 377). Visto en Chromium, cero errores de co
   `contamination` labels.
 - `data/` is gitignored and single-machine, and a cloud session cannot check a single number. A
   derived, versionable export is the cheap fix; whether it gets committed is his call.
+- **The smurf's five ledger rows freeze the day he moves to the main** (roadmap §A1). Ask him on
+  Monday: retire them with a reason, or leave them live and un-accruing? Leaving them live is
+  honest — nothing about them changed — but the panel then shows five rows that can never move.
 - `git config user.name` is unset ON HIS MACHINE, so his commits are authored by `unknown`.
+- **Nothing from S9/S9b has run on the real cache.** The upkeep chain was exercised against live
+  Data Dragon here (a real catalogue and 244 real images), but never against HIS 86 matches.
+- **The briefing has never run on the real cache.** Everything in S9 was measured against fixtures
+  and a seeded database; the first real run is his, and the first thing to check is whether the
+  row it picks is the one a human would have picked.
 - `package.json` declares `engines: >=24`; the cloud container runs Node 22.22 and the whole
   suite passes there too.
 - Biome is at ZERO warnings since S8 (`teamGoldDiffAt` no longer advertises a `puuid` it never

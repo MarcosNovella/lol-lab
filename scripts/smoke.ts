@@ -60,6 +60,7 @@ const EXPECTED = [
   'lol_tags',
   'lol_tag',
   'lol_rank',
+  'lol_antes',
 ];
 
 const found = new Set(tools.map((t) => t.name));

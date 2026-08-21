@@ -52,12 +52,63 @@ Para dejar de rotarla, pedí una **Personal API Key** en el mismo portal
 
 ## El ritual
 
-Cuando terminás de jugar, **doble click a `lol-ui.bat`**. Desde la terminal es `pnpm lol ui`.
+Son dos momentos, y el de antes es el más barato.
+
+**Cuando te sentás a jugar: `pnpm lol antes`.** Te dice qué arreglar antes de entrar (taguear lo
+de anoche, la key vencida — cosas que si no hacés ahora te rompen el cierre a las tres de la
+mañana), UNA cosa para tener en la cabeza y en qué anda el reloj del rango.
+
+Esa "una cosa" sale del ledger de hipótesis y nunca de una corazonada. Y el motor se guarda las
+que todavía pueden dar un veredicto limpio: contarte una predicción antes de jugar la ensucia
+—después no se separa "el patrón era real" de "me lo dijeron y reaccioné"— así que solo te muestra
+las que no van a resolverse en meses igual, te dice cuáles se guardó, y anota lo que te mostró
+para que el veredicto que salga después traiga el asterisco. Sin trampa: no hay forma de espiarlo
+sin que quede anotado.
+
+**Cuando terminás de jugar, doble click a `lol-ui.bat`.** Desde la terminal es `pnpm lol ui`.
 
 El acceso directo del escritorio ya está hecho y apunta acá; si alguna vez hay que rehacerlo,
 el icono es `assets/lol-lab.ico` y el destino es este `.bat` con el repo como carpeta de inicio.
 
 Abre el panel en el navegador y a partir de ahí no volvés a la terminal.
+
+Lo primero que ves es **cómo venís**: el rango, el récord de las últimas partidas, qué hacés
+mejor y peor **contra tu rival de línea**, un gráfico de barras con todas las métricas y tus
+campeones con su récord. La referencia son los otros nueve jugadores de tus propias partidas, que
+Riot ya emparejó a tu MMR — no un promedio de Platino sacado de otro lado.
+
+El gráfico deja afuera las métricas contaminadas (CS/min, KDA, daño) y **te dice cuántas dejó
+afuera**: su promedio está dominado por las partidas que ganaste, así que sirven para mirar pero
+no para encabezar nada. Si ninguna métrica se destaca de verdad, no titula nada en vez de
+inventar un titular.
+
+Y **la curva de crecimiento**: tu media móvil de CS a los 10 contra la de tu rival de línea,
+partida a partida. El rival va en gris punteado abajo porque es el nivel del lobby que te tocó —
+lo único que separa "mejoré" de "me tocaron rivales peores".
+
+No vas a ver una recta de tendencia dibujada, a propósito. Debajo está la pendiente ajustada y la
+misma pendiente suavizando con 5, 10 y 20 partidas: **si el signo cambia entre esas, no hay
+tendencia que leer** y el panel lo dice así. Ese error ya se cometió una vez acá — un "-0.147 por
+partida" que ajustado sobre todos los puntos era +0.030, el signo opuesto.
+
+Si el panel encuentra más de una cuenta, arriba de todo hay un **selector**: arranca en la que
+sincronizaste último y se acuerda de cuál elegiste. El récord nunca se mezcla entre cuentas.
+
+Cuando empieces a taguear aparece **el reparto por tag**: de las partidas que marcaste como "la
+produje yo", cuántas ganaste, y lo mismo para las otras dos. Es lo único de esa pantalla que sale
+de vos y no de la API. Las que quedan sin taguear se cuentan al lado y no se reparten adentro: si
+se cayeran, cada porcentaje sería en realidad "de las que me acordé de taguear".
+
+Nada de esa pantalla enuncia un porcentaje —ni dibuja una barra— con menos de 5 partidas. 3W-0L y
+30W-0L no son la misma afirmación, y dibujadas se ven igual.
+
+También están **las tres fases** —línea, medio y cierre— con tu CS por minuto contra el de tu
+rival en cada una. Ojo con leerlas como habilidad después del minuto 14: el que va ganando rota y
+farmea menos, así que una ventaja que se achica puede ser exactamente lo que estás haciendo bien.
+Por eso el número del rival va siempre al lado del tuyo.
+
+Debajo están los momentos más caros, la curva, el mapa de muertes, el briefing de antes de jugar,
+y recién después lo operativo: sincronizar, taguear, la puesta al día y la key.
 
 Arriba de todo elegís **cuenta, rol y cola**: todo lo de abajo se lee con ese filtro y queda en la
 URL, así que si recargás caés donde estabas. Debajo, una sola tarjeta dice **qué hacer ahora** y
@@ -100,6 +151,26 @@ acordarse, no observar — el software anota cuánto tardaste, así que no se me
 
 Si preferís la terminal, `pnpm lol cerrar` hace el mismo ritual con una tecla por partida
 (`y` la produje yo · `i` salía igual · `p` estuvo pareja). `pnpm lol` solo lista todo lo demás:
+`antes`, `report`, `prep`, `cobertura`, `growth`, `page`, `hip`, `rank`, `items`.
+
+**No hace falta correr nada más.** El botón de sincronizar hace la cadena entera: baja las
+partidas, anota el rango, baja el catálogo de ítems si jugaste un parche nuevo, baja las imágenes
+de los campeones que no había visto nunca y evalúa el ledger si entraron partidas. Ninguna de esas
+tareas gasta un request de Riot —Data Dragon es otro host y no pide key, y evaluar es aritmética
+local— así que pueden correr solas. Bajar partidas, que sí gasta, sigue siendo un botón que
+apretás vos.
+
+La sección **Puesta al día** te muestra qué falta y tiene un botón por tarea, para cuando falta
+algo y no venís de sincronizar.
+
+**La key también se pega en el panel**, abajo de todo: campo, Guardar, y sigue. El panel escribe
+`.env` por vos, no muestra nunca el valor y no acepta nada que no empiece con `RGAPI-`. Es la
+única fricción de todos los días —las de desarrollo vencen cada 24 h— y ya no te saca de la
+página.
+
+Los mismos comandos siguen existiendo por si preferís la terminal: `pnpm lol items` (catálogo por
+parche) y `pnpm lol assets` (5.9 MB de arte, una vez).
+
 `cuenta`, `report`, `prep`, `cobertura`, `growth`, `page`, `hip`, `rank`, `catalogos`, `backfill`.
 
 `pnpm lol cuenta <Nombre#TAG> [etiqueta]` es el primer paso de todo: resuelve el Riot ID y lo
@@ -146,6 +217,7 @@ un solo request.
 | `lol_tags` | Cómo se repartieron los resultados según a quién se los atribuiste. |
 | `lol_tag` | Taguear una partida suelta, para la noche que no corriste `lol cerrar`. |
 | `lol_rank` | Dónde está cada cuenta y qué se movió desde que arrancó el reloj. |
+| `lol_antes` | El briefing de antes de jugar: qué arreglar, un solo foco y el reloj. Anota lo que te muestra. |
 
 Flujo típico la primera vez, conversando:
 
